@@ -2185,10 +2185,12 @@ function renderTracker() {
 let chatMessages = [];
 
 function renderChat() {
-  if (!state.user || state.isAdmin) {
-    document.getElementById('chat-locked-msg').style.display = 'block';
-    document.getElementById('chat-input-row').style.display = 'none';
-  }
+  const lockedMsg = document.getElementById('chat-locked-msg');
+  const inputRow = document.getElementById('chat-input-row');
+  const canChat = !!state.user?.id && !state.isAdmin;
+  lockedMsg.style.display = canChat ? 'none' : 'block';
+  inputRow.style.display = canChat ? 'flex' : 'none';
+  lockedMsg.textContent = state.isAdmin ? '🔒 Admin mode can view chat but cannot post.' : '🔒 Enter this event to join the chat.';
 
   if (!db) {
     chatMessages = [
