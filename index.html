@@ -69,6 +69,8 @@
   .app-logo span { color: var(--chalk); }
 
   .header-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -742,6 +744,8 @@
     .modal { width:100%; max-width:100% !important; padding:14px; margin:8px auto; }
     .fpso-logo-main { width:100%; max-height:32vh; margin-bottom:12px; }
     .fpso-logo-header { width:58px; height:40px; }
+    .race-draft-layout { grid-template-columns:1fr !important; }
+    .race-draft-layout > .card { position:static !important; order:-1; }
   }
 
   /* ===== SCROLLBAR ===== */
@@ -999,6 +1003,7 @@
   <div class="app-header">
     <img class="fpso-logo-header" src="IMG_7391.jpeg" alt="FPSO Race Day">
     <div class="header-right">
+      <button class="btn-admin" id="btn-refresh" onclick="refreshEventData()" title="Reload the current event and saved selections">↻ Refresh</button>
       <div class="user-badge" id="user-badge">
         <span class="horse-dot" id="user-badge-dot"></span>
         <span id="user-badge-name"></span>
@@ -1136,9 +1141,15 @@
             <button class="btn btn-gold btn-sm" id="auto-card-btn" onclick="autoGenerateCard()" style="display:none;">⚡ Auto Generate 10</button>
             <button class="btn btn-primary btn-sm" id="accept-auto-btn" onclick="acceptGeneratedCard()" style="display:none;">✓ Accept Card</button>
             <button class="btn btn-outline btn-sm" id="regen-auto-btn" onclick="autoGenerateCard()" style="display:none;">↻ Generate Another</button>
-            <button class="btn btn-outline btn-sm" id="clear-auto-btn" onclick="clearGeneratedCard()" style="display:none;">Edit Manually</button>
+            <button class="btn btn-outline btn-sm" id="clear-auto-btn" onclick="editGeneratedCard()" style="display:none;">Edit Manually</button>
           </div>
-          <div id="race-search-results"></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:14px;align-items:start;" class="race-draft-layout">
+            <div id="race-search-results"></div>
+            <div class="card" style="position:sticky;top:90px;padding:12px;margin-top:14px;">
+              <div style="font-family:'Press Start 2P',monospace;font-size:10px;margin-bottom:8px;">Selected Card</div>
+              <div id="draft-card-summary"><div class="text-dim text-sm">No races selected.</div></div>
+            </div>
+          </div>
         </div>
 
         <div class="card">
@@ -1287,11 +1298,24 @@ async function initApp() {
 }
 
 function checkLocalUser() {
+  if (state.isAdmin || sessionStorage.getItem('raceday_admin') === '1') {
+    state.isAdmin = true;
+    document.getElementById('btn-admin-tab').style.display = 'block';
+    showMainApp();
+    goAdmin();
+    return;
+  }
   const saved = localStorage.getItem('raceday_user');
   if (saved) {
     try {
-      state.user = JSON.parse(saved);
-      showMainApp();
+      const parsed = JSON.parse(saved);
+      if (state.currentEvent && String(parsed.event_id) === String(state.currentEvent.id)) {
+        state.user = parsed;
+        showMainApp();
+      } else {
+        localStorage.removeItem('raceday_user');
+        showLanding();
+      }
     } catch(e) {
       localStorage.removeItem('raceday_user');
       showLanding();
@@ -1303,58 +1327,91 @@ function checkLocalUser() {
 
 async function loadCurrentEvent() {
   if (!db) {
-    // Demo mode — use mock data
-    state.currentEvent = {
-      id: 'demo',
-      name: 'Race Day — Demo Week',
-      status: 'open',
-      lockout_time: new Date(Date.now() + 86400000 * 2).toISOString(),
-    };
+    state.currentEvent = { id: 'demo', name: 'Race Day — Demo Week', status: 'open',
+      lockout_time: new Date(Date.now() + 86400000 * 2).toISOString() };
     state.races = getDemoRaces();
-    return;
+    return true;
   }
 
   try {
-    const { data: events } = await db
-      .from('events')
-      .select('*')
-      .eq('status', 'open')
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (events && events.length > 0) {
-      state.currentEvent = events[0];
-      state.lockoutOverride = localStorage.getItem('raceday_lockout_override_' + state.currentEvent.id) || null;
-      const { data: races } = await db
-        .from('races')
-        .select('*, runners(*)')
-        .eq('event_id', state.currentEvent.id)
-        .order('race_time', { ascending: true });
-      state.races = races || [];
-
-      // Load the live field and each participant's selections for leaderboard/tracker.
-      const { data: participants, error: participantError } = await db
-        .from('participants')
-        .select('*')
-        .eq('event_id', state.currentEvent.id);
-      if (participantError) console.error('Participant load error:', participantError);
-      const { data: selections, error: selectionError } = await db
-        .from('selections')
-        .select('*')
-        .eq('event_id', state.currentEvent.id);
-      if (selectionError) console.error('Selection load error:', selectionError);
-
+    const { data: events, error: eventError } = await db.from('events').select('*')
+      .eq('status', 'open').order('created_at', { ascending: false }).limit(1);
+    if (eventError) throw eventError;
+    const currentEvent = events?.[0] || null;
+    let races = [], participants = [];
+    if (currentEvent) {
+      // Results are stored on races; load a complete snapshot before replacing the displayed data.
+      const responses = await Promise.all([
+        db.from('races').select('*, runners(*)').eq('event_id', currentEvent.id).order('race_time', { ascending: true }),
+        db.from('participants').select('*').eq('event_id', currentEvent.id),
+        db.from('selections').select('*').eq('event_id', currentEvent.id)
+      ]);
+      for (const response of responses) if (response.error) throw response.error;
+      races = responses[0].data || [];
       const byParticipant = {};
-      (selections || []).forEach(sel => {
+      (responses[2].data || []).forEach(sel => {
         (byParticipant[sel.participant_id] ||= {})[sel.race_id] = sel.runner_number;
       });
-      state.participants = (participants || []).map(p => ({
-        ...p,
-        selections: byParticipant[p.id] || {}
-      }));
+      participants = (responses[1].data || []).map(p => ({ ...p, selections: byParticipant[p.id] || {} }));
     }
-  } catch(e) {
-    console.error('DB error:', e);
+    state.currentEvent = currentEvent;
+    state.races = races;
+    state.participants = participants;
+    state.lockoutOverride = currentEvent ? localStorage.getItem('raceday_lockout_override_' + currentEvent.id) || null : null;
+    return true;
+  } catch (e) {
+    console.error('Event load error:', e);
+    return false;
+  }
+}
+
+let refreshingEvent = false;
+async function refreshEventData() {
+  if (refreshingEvent) return;
+  if (!db) { showToast('Live connection unavailable. Please try again.', 'warn'); return; }
+  refreshingEvent = true;
+  const button = document.getElementById('btn-refresh');
+  button.disabled = true;
+  button.textContent = '↻ Refreshing…';
+  button.setAttribute('aria-busy', 'true');
+  const previousEventId = state.currentEvent?.id;
+  try {
+    if (!await loadCurrentEvent()) throw new Error('Unable to load event');
+    const eventChanged = previousEventId !== state.currentEvent?.id;
+    if (eventChanged) {
+      state.selections = {};
+      state.user = null;
+      localStorage.removeItem('raceday_user');
+      document.getElementById('user-badge').style.display = 'none';
+      chatMessages = [];
+      setupRealtimeSubs();
+      renderChat();
+    }
+    if (state.user) {
+      const participant = state.participants.find(p => String(p.id) === String(state.user.id));
+      state.selections = { ...(participant?.selections || {}) };
+      localStorage.setItem('raceday_selections_' + state.currentEvent.id, JSON.stringify(state.selections));
+    }
+    updateBanner();
+    renderRaces();
+    renderLeaderboard();
+    renderTracker();
+    if (state.isAdmin) {
+      renderAdminCurrentEvent();
+      renderAdminRaceList();
+      renderSettleList();
+      renderPaidList();
+    }
+    if (eventChanged && !state.isAdmin) showLanding();
+    showToast('Event, races, results and saved selections refreshed', 'success');
+  } catch (e) {
+    console.error('Refresh failed:', e);
+    showToast('Refresh failed. Please try again.', 'danger');
+  } finally {
+    refreshingEvent = false;
+    button.disabled = false;
+    button.textContent = '↻ Refresh';
+    button.removeAttribute('aria-busy');
   }
 }
 
@@ -1599,7 +1656,7 @@ async function submitRegistration() {
     userId = 'demo_' + Date.now();
   }
 
-  state.user = { id: userId, name, colour: selectedColour };
+  state.user = { id: userId, name, colour: selectedColour, event_id: state.currentEvent.id };
   localStorage.setItem('raceday_user', JSON.stringify(state.user));
 
   document.getElementById('modal-register').classList.add('hidden');
@@ -1623,6 +1680,7 @@ function showMainApp() {
     document.getElementById('user-badge-dot').style.background = state.user.colour;
   }
 
+  showTab('races');
   updateBanner();
   renderRaces();
   renderLeaderboard();
@@ -1651,7 +1709,11 @@ async function setLockoutOverride(mode) {
 }
 
 function updateBanner() {
-  if (!state.currentEvent) return;
+  if (!state.currentEvent) {
+    document.getElementById('banner-event-name').textContent = 'No active event';
+    document.getElementById('banner-event-status').textContent = '';
+    return;
+  }
   document.getElementById('banner-event-name').textContent = state.currentEvent.name;
   const lockout = new Date(state.currentEvent.lockout_time);
   const isLocked = isSelectionsLocked();
@@ -1674,6 +1736,7 @@ function showTab(tab) {
   document.getElementById('section-' + tab).classList.add('active');
   document.getElementById('tab-' + tab).classList.add('active');
 
+  if (tab === 'races') renderRaces();
   if (tab === 'leaderboard') renderLeaderboard();
   if (tab === 'tracker') renderTracker();
   if (tab === 'chat') scrollChat();
@@ -1695,7 +1758,9 @@ function showAdminSection(s) {
   document.querySelectorAll('.admin-section').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('admin-' + s).classList.add('active');
-  event.target.classList.add('active');
+  document.querySelectorAll('.admin-tab').forEach(t => {
+    if (t.getAttribute('onclick') === "showAdminSection('" + s + "')") t.classList.add('active');
+  });
 
   if (s === 'paid') renderPaidList();
   if (s === 'history') renderHistory();
@@ -1722,7 +1787,11 @@ function renderRaces() {
   const tbcMsg = document.getElementById('races-tbc');
   const saveBar = document.getElementById('save-selections-bar');
 
-  if (!state.currentEvent) { container.innerHTML = ''; return; }
+  if (!state.currentEvent) {
+    container.innerHTML = '<div class="alert alert-info">No active event. Check back for the next race card.</div>';
+    lockedMsg.style.display = tbcMsg.style.display = saveBar.style.display = 'none';
+    return;
+  }
 
   const lockout = new Date(state.currentEvent.lockout_time);
   const isLocked = isSelectionsLocked();
@@ -1752,7 +1821,7 @@ function renderRaces() {
             <div style="background:rgba(201,168,76,0.1); border:1px solid var(--gold); border-radius:6px; padding:10px 14px; margin-bottom:10px; font-size:13px;">
               <strong style="color:var(--gold);">Result:</strong>
               1st #${race.result_1st} · 2nd #${race.result_2nd} · 3rd #${race.result_3rd || '-'}
-              &nbsp;|&nbsp; Win: $${race.win_div?.toFixed(2)} · Place: $${race.place_div?.toFixed(2)}
+              &nbsp;|&nbsp; Win: $${Number(race.win_div || 0).toFixed(2)} · Place: $${Number(race.place_div || 0).toFixed(2)}
               ${race.favourite_number ? `· Fav: #${race.favourite_number}` : ''}
             </div>
           ` : ''}
@@ -2082,6 +2151,9 @@ async function loadChatFromDB() {
 // ADMIN
 // ============================================================
 function showAdminLogin() {
+  if (state.isAdmin || sessionStorage.getItem('raceday_admin') === '1') { checkLocalUser(); return; }
+  document.getElementById('admin-password').value = '';
+  document.getElementById('admin-login-error').style.display = 'none';
   document.getElementById('modal-admin-login').classList.remove('hidden');
 }
 
@@ -2093,14 +2165,12 @@ function adminLogin() {
   const pw = document.getElementById('admin-password').value;
   if (pw === ADMIN_PASSWORD) {
     state.isAdmin = true;
+    sessionStorage.setItem('raceday_admin', '1');
     hideAdminLogin();
     document.getElementById('btn-admin-tab').style.display = 'block';
 
-    document.getElementById('modal-landing').classList.add('hidden');
-    document.getElementById('modal-tcs').classList.add('hidden');
-    document.getElementById('modal-register').classList.add('hidden');
-    document.getElementById('main-app').style.display = 'block';
-    updateBanner();
+    document.getElementById('admin-password').value = '';
+    showMainApp();
     goAdmin();
     showToast('Admin access granted', 'success');
   } else {
@@ -2195,7 +2265,7 @@ function acceptanceTimeISO(date, localTime) {
 }
 
 function perthTime(iso) {
-  if (!iso) return 'TBC';
+  if (!iso || Number.isNaN(new Date(iso).getTime())) return 'TBC';
   return new Intl.DateTimeFormat('en-AU', {
     timeZone:'Australia/Perth', hour:'numeric', minute:'2-digit', hour12:true
   }).format(new Date(iso)) + ' AWST';
@@ -2252,7 +2322,7 @@ async function loadSaturdayCard() {
     }).sort((a,b)=>new Date(a.time)-new Date(b.time));
     if (!loadedRacingCard.length) throw new Error('No Australian races returned for ' + date + '.');
     document.getElementById('auto-card-btn').style.display = loadedRacingCard.length >= 10 ? 'inline-flex' : 'none';
-    renderLoadedRaces(loadedRacingCard);
+    clearGeneratedCard();
   } catch (e) {
     container.innerHTML = '<div class="alert alert-danger">' + escapeHtml(e.message) + '</div>';
   }
@@ -2310,7 +2380,7 @@ function renderLoadedRaces(races) {
               <div style="font-weight:700;">R${escapeHtml(String(r.race_number || '?'))} · ${escapeHtml(r.name)} ${badge} ${autoBadge}</div>
               <div class="text-xs text-dim">${perthTime(r.time)}${r.distance ? ' · '+escapeHtml(String(r.distance))+'m' : ''} · ${escapeHtml(String(r.active_runners ?? r.runners.length))} active runners${r.scratched_runners ? ' · '+escapeHtml(String(r.scratched_runners))+' scratched' : ''}</div>
             </div>
-            <button class="btn ${r.autoSelected ? 'btn-gold' : 'btn-primary'} btn-sm" onclick="addLoadedRace('${escapeHtml(String(r.id || ''))}')">${r.autoSelected ? '✓ Add Pick' : '+ Add'}</button>
+            <button class="btn ${r.autoSelected ? 'btn-gold' : 'btn-primary'} btn-sm" onclick="toggleDraftRace('${escapeHtml(String(r.id || ''))}')">${r.autoSelected ? '✓ Selected' : '+ Select'}</button>
           </div>`;
       }).join('')}
     </div>
@@ -2382,17 +2452,51 @@ function autoGenerateCard() {
     showToast('Could only build ' + chosen.length + ' races while keeping the 2-per-track limit. Add races manually if needed.', 'warn');
   }
   loadedRacingCard.forEach(r=>r.autoSelected=used.has(r.id));
-  renderLoadedRaces(loadedRacingCard);
+  filterLoadedRaces();
+  renderDraftSummary();
   document.getElementById('clear-auto-btn').style.display='inline-flex';
   document.getElementById('accept-auto-btn').style.display=chosen.length===10 ? 'inline-flex' : 'none';
   document.getElementById('regen-auto-btn').style.display='inline-flex';
   if (chosen.length===10) showToast('10-race draft generated — max 2 races per track', 'success');
 }
 
+function editGeneratedCard() {
+  document.getElementById('accept-auto-btn').style.display=loadedRacingCard.filter(r=>r.autoSelected).length===10 ? 'inline-flex' : 'none';
+  document.getElementById('regen-auto-btn').style.display='inline-flex';
+  document.getElementById('clear-auto-btn').style.display='none';
+  filterLoadedRaces();
+  renderDraftSummary();
+  showToast('Manual edit mode — tap selected races to remove or other races to add', 'success');
+}
+
+function toggleDraftRace(apiId) {
+  const r = loadedRacingCard.find(x => String(x.id) === String(apiId));
+  if (!r) return;
+  if (r.autoSelected) r.autoSelected = false;
+  else {
+    const selected = loadedRacingCard.filter(x=>x.autoSelected);
+    if (selected.length >= 10) { showToast('Remove a selected race before adding another', 'warn'); return; }
+    const sameTrack = selected.filter(x => String(x.track || x.venue || '').trim().toLowerCase() === String(r.track || r.venue || '').trim().toLowerCase()).length;
+    if (sameTrack >= 2) { showToast('Auto/manual draft is limited to 2 races per track', 'warn'); return; }
+    r.autoSelected = true;
+  }
+  filterLoadedRaces();
+  renderDraftSummary();
+  document.getElementById('accept-auto-btn').style.display = loadedRacingCard.filter(x=>x.autoSelected).length===10 ? 'inline-flex' : 'none';
+}
+
+function renderDraftSummary() {
+  const box = document.getElementById('draft-card-summary');
+  if (!box) return;
+  const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>new Date(a.time)-new Date(b.time));
+  box.innerHTML = picks.length ? picks.map((r,i)=>`<div style="padding:7px 0;border-bottom:1px solid var(--mid);font-size:12px;overflow-wrap:anywhere;"><strong>${i+1}.</strong> ${escapeHtml(r.track)} R${escapeHtml(String(r.race_number||'?'))}<br><span class="text-dim">${perthTime(r.time)} · ${escapeHtml(r.name)}</span></div>`).join('') : '<div class="text-dim text-sm">No races selected.</div>';
+}
+
 function clearGeneratedCard() {
   loadedRacingCard.forEach(r=>r.autoSelected=false);
   ['clear-auto-btn','accept-auto-btn','regen-auto-btn'].forEach(id=>document.getElementById(id).style.display='none');
-  renderLoadedRaces(loadedRacingCard);
+  filterLoadedRaces();
+  renderDraftSummary();
 }
 
 async function acceptGeneratedCard() {
@@ -2804,6 +2908,7 @@ function copyAppUrl() {
 // REALTIME (Supabase)
 // ============================================================
 function setupRealtimeSubs() {
+  if (state.chatSub) { db.removeChannel(state.chatSub); state.chatSub = null; }
   if (!state.currentEvent) return;
 
   state.chatSub = db.channel('chat-' + state.currentEvent.id)
