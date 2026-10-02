@@ -1751,10 +1751,13 @@ function renderRaces() {
                      onclick="${canSelect ? `selectRunner('${race.id}', ${runner.number})` : ''}">
                   <div class="runner-number">${runner.number}</div>
                   <div class="runner-name">
-                    ${runner.name}
-                    ${isScratched ? '<span style="font-size:10px; color:var(--red); margin-left:6px;">SCRATCHED</span>' : ''}
+                    <div>${runner.name}${isScratched ? '<span style="font-size:10px; color:var(--red); margin-left:6px;">SCRATCHED</span>' : ''}</div>
+                    ${runner.jockey || runner.trainer ? `<div style="font-size:10px;color:var(--text-dim);margin-top:3px;">${runner.jockey ? 'J: '+runner.jockey : ''}${runner.jockey && runner.trainer ? ' · ' : ''}${runner.trainer ? 'T: '+runner.trainer : ''}</div>` : ''}
                   </div>
-                  <div class="runner-odds">$${runner.odds?.toFixed(1) || '—'}</div>
+                  <div class="runner-odds" style="min-width:78px;text-align:right;">
+                    <div>W ${runner.odds != null ? Number(runner.odds).toFixed(2) : '—'}</div>
+                    <div style="font-size:10px;color:var(--text-dim);margin-top:2px;">P ${runner.place_odds != null ? Number(runner.place_odds).toFixed(2) : '—'}</div>
+                  </div>
                   <div class="selection-tick">✓</div>
                 </div>
               `;
@@ -2363,7 +2366,7 @@ function clearGeneratedCard() {
   renderLoadedRaces(loadedRacingCard);
 }
 
-async async function acceptGeneratedCard() {
+async function acceptGeneratedCard() {
   const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>(new Date(a.time||0))-(new Date(b.time||0)));
   if (picks.length !== 10) { showToast('Generate a 10-race draft first', 'warn'); return; }
   if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
@@ -2504,7 +2507,7 @@ async function refreshSportsbetRace(raceId) {
     race.odds_snapshot_favourite = active[0] ? {number:active[0].number,name:active[0].name,win_odds:active[0].odds,captured_at:race.odds_as_of} : null;
     // Only call this the pre-race favourite when refreshed within 10 minutes of the advertised jump.
     const jump = new Date(race.race_time).getTime();
-    if (active[0] && Math.abs(jump - race.odds_as_of) <= 10*60*1000) {
+    if (active[0] && race.odds_as_of <= jump && (jump - race.odds_as_of) <= 10*60*1000) {
       race.pre_race_favourite = {...race.odds_snapshot_favourite};
       race.favourite_number = active[0].number;
     }
