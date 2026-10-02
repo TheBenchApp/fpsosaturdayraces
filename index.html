@@ -2323,7 +2323,7 @@ function clearGeneratedCard() {
   renderLoadedRaces(loadedRacingCard);
 }
 
-async function acceptGeneratedCard() {
+async async function acceptGeneratedCard() {
   const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>(new Date(a.time||0))-(new Date(b.time||0)));
   if (picks.length !== 10) { showToast('Generate a 10-race draft first', 'warn'); return; }
   if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
@@ -2387,6 +2387,35 @@ async function addLoadedRace(apiId) {
     result_1st:null, result_2nd:null, result_3rd:null,
     win_div:null, place_div:null, favourite_number:null
   };
+
+  if (db) {
+    const { data: savedRace, error: raceError } = await db.from('races').insert({
+      event_id: state.currentEvent.id,
+      name: newRace.name,
+      track: newRace.track,
+      race_number: newRace.race_number,
+      race_time: newRace.race_time,
+      status: 'open'
+    }).select().single();
+    if (raceError) { showToast('Could not save race: ' + raceError.message, 'danger'); return; }
+
+    newRace.id = savedRace.id;
+    const runnerRows = runners.map(x => ({
+      race_id: savedRace.id,
+      number: Number(x.number),
+      name: x.name,
+      odds: x.odds == null ? null : Number(x.odds),
+      scratched: Boolean(x.scratched)
+    }));
+    if (runnerRows.length) {
+      const { error: runnerError } = await db.from('runners').insert(runnerRows);
+      if (runnerError) {
+        await db.from('races').delete().eq('id', savedRace.id);
+        showToast('Could not save runners: ' + runnerError.message, 'danger');
+        return;
+      }
+    }
+  }
 
   state.races.push(newRace);
   showToast('R' + r.race_number + ' ' + r.track + ' added', 'success');
@@ -2474,9 +2503,18 @@ function renderAdminRaceList() {
   `).join('');
 }
 
-function removeRace(raceId) {
+async function removeRace(raceId) {
   if (!confirm('Remove this race?')) return;
-  state.races = state.races.filter(r => r.id !== raceId);
+  if (db) {
+    // Remove child rows first for schemas without ON DELETE CASCADE.
+    const { error: selectionError } = await db.from('selections').delete().eq('race_id', raceId);
+    if (selectionError) { showToast('Could not remove race selections: ' + selectionError.message, 'danger'); return; }
+    const { error: runnerError } = await db.from('runners').delete().eq('race_id', raceId);
+    if (runnerError) { showToast('Could not remove race runners: ' + runnerError.message, 'danger'); return; }
+    const { error: raceError } = await db.from('races').delete().eq('id', raceId);
+    if (raceError) { showToast('Could not remove race: ' + raceError.message, 'danger'); return; }
+  }
+  state.races = state.races.filter(r => String(r.id) !== String(raceId));
   renderAdminRaceList();
   renderRaces();
 }
