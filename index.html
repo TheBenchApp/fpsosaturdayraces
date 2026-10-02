@@ -1020,6 +1020,33 @@
   </div>
 </div>
 
+<!-- FAQ / Help Modal -->
+<div class="modal-overlay hidden" id="modal-faq">
+  <div class="modal fade-in" style="max-width:620px;">
+    <div class="modal-title">Help & FAQ</div>
+    <div class="modal-sub">The quick guide to Race Day.</div>
+    <div class="tcs-body">
+      <h3>How do I enter?</h3>
+      <p>Create or log in to your player account, then pick one horse in every race before the entry cutoff. A complete card is required for a valid entry.</p>
+      <h3>How does scoring work?</h3>
+      <p>Winner: official Sportsbet win dividend + place dividend. Second or third: official place dividend. Unplaced: $0. Your total across the card is your score.</p>
+      <h3>What if my horse is scratched?</h3>
+      <p>Your original selection stays recorded and the system uses the captured pre-race favourite as the substitute under the competition scratching rule.</p>
+      <h3>When do selections lock?</h3>
+      <p>The event banner shows the current cutoff in AWST. Once locked, selections cannot be changed unless admin explicitly reopens them.</p>
+      <h3>Where can I check my picks?</h3>
+      <p>Open My Selections to see every race and your current horse. Check all races before cutoff.</p>
+      <h3>How does the leaderboard work?</h3>
+      <p>Scores update as race results are settled. The highest accumulated payout is on top.</p>
+      <h3>Can Race Day run on days other than Saturday?</h3>
+      <p>Yes. Admin can create an event and load Australian thoroughbred races for any selected calendar date, including special weekday race days.</p>
+      <h3>Account help</h3>
+      <p>Your username and password are your permanent Race Day login. If you cannot access your account, contact admin rather than creating duplicate accounts.</p>
+    </div>
+    <button class="btn btn-primary btn-full" type="button" onclick="hideFaq()">Got it</button>
+  </div>
+</div>
+
 <!-- ===== MAIN APP ===== -->
 <div id="main-app" style="display:none;">
 
@@ -1029,6 +1056,7 @@
     <div class="header-right">
       <span id="admin-mode-badge" class="pill pill-gold" style="display:none;">ADMIN MODE</span>
       <button class="btn-admin" id="btn-refresh" onclick="refreshEventData()" title="Reload the current event and saved selections">↻ Refresh</button>
+      <button class="btn-admin" id="btn-faq" onclick="showFaq()" title="Help & FAQ" aria-label="Help and FAQ">? FAQ</button>
       <div class="user-badge" id="user-badge">
         <span class="horse-dot" id="user-badge-dot"></span>
         <span id="user-badge-name"></span>
@@ -2271,6 +2299,14 @@ function hideAdminLogin() {
   document.getElementById('modal-admin-login').classList.add('hidden');
 }
 
+function showFaq() {
+  document.getElementById('modal-faq').classList.remove('hidden');
+}
+function hideFaq() {
+  document.getElementById('modal-faq').classList.add('hidden');
+}
+
+
 let adminLoginPending = false;
 async function verifyAdminSession() {
   if (!db) throw new Error('Database connection unavailable. Reload and try again.');
@@ -2545,10 +2581,32 @@ async function loadRaceCard() {
   }
   container.innerHTML = '<div class="text-dim text-sm">Loading Australian race card for ' + escapeHtml(formatPerthDate(date)) + '…</div>';
   try {
-    const res = await fetch('/.netlify/functions/odds-api-net?action=racing&race_type=horse-racing&race_country=AU');
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || 'Odds API request failed');
-    const items = payload.items || payload.data?.items || payload.data || [];
+    // Query the provider for the exact selected AWST calendar day. Perth has no DST,
+    // so this is a stable midnight-to-midnight 24-hour window.
+    const startFrom = Math.floor(new Date(date + 'T00:00:00+08:00').getTime() / 1000);
+    const startTo = startFrom + 86400;
+    let items = [];
+    let cursor = null;
+    let page = 0;
+    do {
+      const params = new URLSearchParams({
+        action:'racing',
+        race_type:'horse-racing',
+        race_country:'AU',
+        start_from:String(startFrom),
+        start_to:String(startTo),
+        limit:'100'
+      });
+      if (cursor) params.set('cursor', cursor);
+      const res = await fetch('/.netlify/functions/odds-api-net?' + params.toString());
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || 'Odds API request failed');
+      const pageItems = payload.items || payload.data?.items || payload.data || [];
+      if (Array.isArray(pageItems)) items.push(...pageItems);
+      cursor = payload.next_cursor || payload.data?.next_cursor || null;
+      page += 1;
+    } while (cursor && page < 10);
+
     loadedRacingCard = items.filter(r => {
       if (!r.race_start_time) return false;
       const d = new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Perth',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Number(r.race_start_time)*1000));
@@ -3163,7 +3221,11 @@ function setupRealtimeSubs() {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat', filter: `event_id=eq.${state.currentEvent.id}` },
       payload => {
         const m = payload.new;
-        chatMessages.push({ id: m.id, sender: m.participant_name, colour: m.participant_colour, text: m.message, ts: new Date(m.created_at) });
+        // The sender also reloads chat after INSERT. Realtime can arrive before or after
+        // that reload, so de-duplicate by the database message id.
+        if (!chatMessages.some(existing => String(existing.id) === String(m.id))) {
+          chatMessages.push({ id: m.id, sender: m.participant_name, colour: m.participant_colour, text: m.message, ts: new Date(m.created_at) });
+        }
         if (document.getElementById('section-chat').classList.contains('active')) {
           renderChatMessages();
         }
