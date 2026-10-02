@@ -1003,12 +1003,14 @@
   <div class="app-header">
     <img class="fpso-logo-header" src="IMG_7391.jpeg" alt="FPSO Race Day">
     <div class="header-right">
+      <span id="admin-mode-badge" class="pill pill-gold" style="display:none;">ADMIN MODE</span>
       <button class="btn-admin" id="btn-refresh" onclick="refreshEventData()" title="Reload the current event and saved selections">↻ Refresh</button>
       <div class="user-badge" id="user-badge">
         <span class="horse-dot" id="user-badge-dot"></span>
         <span id="user-badge-name"></span>
       </div>
       <button class="btn-admin" id="btn-admin-tab" onclick="goAdmin()" style="display:none;">⚙ Admin</button>
+      <button class="btn-admin" id="btn-logout" onclick="logoutCurrentSession()">Logout</button>
     </div>
   </div>
 
@@ -1319,6 +1321,8 @@ async function checkLocalUser() {
   }
   if (state.isAdmin) {
     state.isAdmin = true;
+    state.user = null;
+    state.selections = {};
     document.getElementById('btn-admin-tab').style.display = 'block';
     showMainApp();
     goAdmin();
@@ -1561,7 +1565,7 @@ function renderEventPreview() {
     <div style="background:var(--dark3); border-radius:8px; padding:16px; margin-bottom:12px;">
       <div style="font-family:'Press Start 2P',monospace; font-size:22px; color:var(--gold); letter-spacing:1px;">${escapeHtml(state.currentEvent.name)}</div>
       <div style="font-size:12px; color:var(--text-dim); margin-top:4px;">
-        Selections close: ${isLocked ? '<span style="color:var(--red);">LOCKED</span>' : lockout.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }) + ' AWST'}
+        Selections close: ${isLocked ? '<span style="color:var(--red);">LOCKED</span>' : formatPerthDateTime(lockout)}
       </div>
     </div>
     <div style="font-size:13px; color:var(--text-dim); margin-bottom:10px; font-weight:600;">THIS WEEK'S RACES</div>
@@ -1611,6 +1615,7 @@ function hideTCs() {
 }
 
 function proceedToRegister() {
+  if (state.isAdmin) { showToast('Admin mode cannot enter the player registration flow.', 'warn'); return; }
   if (!document.getElementById('tcs-agree').checked) {
     alert('You need to agree to the rules first.');
     return;
@@ -1625,6 +1630,7 @@ function backToTCs() {
 }
 
 async function submitRegistration() {
+  if (state.isAdmin) { showToast('Admin mode cannot register as a player. Log out of Admin first.', 'warn'); return; }
   const name = document.getElementById('reg-name').value.trim();
   const errEl = document.getElementById('reg-error');
   errEl.style.display = 'none';
@@ -1686,7 +1692,12 @@ function showMainApp() {
   document.getElementById('modal-register').classList.add('hidden');
   document.getElementById('main-app').style.display = 'block';
 
-  if (state.user) {
+  const adminBadge = document.getElementById('admin-mode-badge');
+  const userBadge = document.getElementById('user-badge');
+  if (adminBadge) adminBadge.style.display = state.isAdmin ? 'inline-flex' : 'none';
+  if (userBadge && state.isAdmin) userBadge.style.display = 'none';
+
+  if (state.user && !state.isAdmin) {
     const badge = document.getElementById('user-badge');
     badge.style.display = 'flex';
     badge.style.alignItems = 'center';
@@ -1827,7 +1838,7 @@ function renderRaces() {
         <div class="race-header">
           <div>
             <div class="race-title">Race ${race.race_number} — ${race.track}</div>
-            <div class="race-meta">${new Date(race.race_time).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Perth' })} AWST · ${race.runners?.length || 0} runners</div>
+            <div class="race-meta">${perthTime(race.race_time).replace(' AWST','')} AWST · ${race.runners?.length || 0} runners</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
             ${settled ? `<span class="pill pill-gold">Settled</span>` : `<span class="pill pill-green">Open</span>`}
@@ -1879,11 +1890,13 @@ function renderRaces() {
 }
 
 function selectRunner(raceId, number) {
+  if (state.isAdmin) { showToast('Admin mode is view/control only. Log out to make player selections.', 'warn'); return; }
   state.selections[raceId] = number;
   renderRaces();
 }
 
 async function saveSelections() {
+  if (state.isAdmin) { showToast('Admin mode cannot save player selections.', 'warn'); return; }
   if (!state.user || !state.currentEvent) return;
   if (isSelectionsLocked()) { showToast('Selections are locked', 'warn'); renderRaces(); return; }
 
@@ -2070,7 +2083,7 @@ function renderTracker() {
 let chatMessages = [];
 
 function renderChat() {
-  if (!state.user) {
+  if (!state.user || state.isAdmin) {
     document.getElementById('chat-locked-msg').style.display = 'block';
     document.getElementById('chat-input-row').style.display = 'none';
   }
@@ -2121,6 +2134,7 @@ function scrollChat() {
 }
 
 async function sendChat() {
+  if (state.isAdmin) { showToast('Admin mode cannot post as a player.', 'warn'); return; }
   if (!state.user) return;
   if (!db) { showToast('Database unavailable. Message was not sent.', 'danger'); return; }
   const input = document.getElementById('chat-input');
@@ -2204,6 +2218,8 @@ async function adminLogin() {
   try {
     await verifyAdminSession();
     state.isAdmin = true;
+    state.user = null;
+    state.selections = {};
     sessionStorage.removeItem('raceday_admin');
     document.getElementById('btn-admin-tab').style.display = 'block';
     document.getElementById('admin-password').value = '';
@@ -2232,7 +2248,7 @@ function renderAdminCurrentEvent() {
     <div class="flex-between" style="margin-bottom:12px;">
       <div>
         <div style="font-size:18px; font-weight:700;">${escapeHtml(state.currentEvent.name)}</div>
-        <div class="text-sm text-dim">Lockout: ${lockout.toLocaleString('en-AU',{timeZone:'Australia/Perth'})} AWST ${isLocked ? '<span style="color:var(--red);">— LOCKED</span>' : ''}</div>
+        <div class="text-sm text-dim">Lockout: ${formatPerthDateTime(lockout)} ${isLocked ? '<span style="color:var(--red);">— LOCKED</span>' : ''}</div>
       </div>
       <span class="pill ${state.currentEvent.status === 'open' ? 'pill-green' : 'pill-grey'}">${state.currentEvent.status}</span>
     </div>
@@ -2262,6 +2278,7 @@ async function createRaceDayEvent() {
   if (!name || !lockout) { setCreateEventStatus('Enter an event name and lockout date/time.', 'warn'); return; }
   const lockoutDate = new Date(lockout + '+08:00');
   if (Number.isNaN(lockoutDate.getTime())) { setCreateEventStatus('Enter a valid lockout date/time in Perth (AWST).', 'warn'); return; }
+  if (!isSaturdayDateValue(lockout.slice(0,10))) { setCreateEventStatus('Competition lockout must be on a Saturday (AWST).', 'warn'); return; }
   if (!db) { setCreateEventStatus('Database connection unavailable. Reload the page and try again. No event was saved.', 'danger'); return; }
   if (state.currentEvent?.status === 'open') { setCreateEventStatus('Close the current event before creating another.', 'warn'); return; }
 
@@ -2353,8 +2370,31 @@ function acceptanceTimeISO(date, localTime) {
 function perthTime(iso) {
   if (!iso || Number.isNaN(new Date(iso).getTime())) return 'TBC';
   return new Intl.DateTimeFormat('en-AU', {
-    timeZone:'Australia/Perth', hour:'numeric', minute:'2-digit', hour12:true
+    timeZone:'Australia/Perth', hour:'2-digit', minute:'2-digit', hourCycle:'h23'
   }).format(new Date(iso)) + ' AWST';
+}
+
+function formatPerthDate(isoOrDate) {
+  if (!isoOrDate) return '';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(isoOrDate))
+    ? new Date(String(isoOrDate) + 'T12:00:00+08:00') : new Date(isoOrDate);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone:'Australia/Perth', day:'2-digit', month:'2-digit', year:'numeric'
+  }).format(date);
+}
+
+function formatPerthDateTime(iso) {
+  if (!iso || Number.isNaN(new Date(iso).getTime())) return '';
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone:'Australia/Perth', day:'2-digit', month:'2-digit', year:'numeric',
+    hour:'2-digit', minute:'2-digit', hourCycle:'h23'
+  }).format(new Date(iso)) + ' AWST';
+}
+
+function isSaturdayDateValue(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return false;
+  return new Date(dateStr + 'T12:00:00+08:00').getUTCDay() === 6;
 }
 
 function perthSaturdayLockoutISO(dateStr) {
@@ -2370,11 +2410,18 @@ function syncEventLockoutToRaceDate() {
 }
 
 function nextSaturdayISO() {
-  const now = new Date();
-  const perth = new Date(now.toLocaleString('en-US', { timeZone:'Australia/Perth' }));
-  const days = (6 - perth.getDay() + 7) % 7;
-  perth.setDate(perth.getDate() + days);
-  return perth.toISOString().slice(0,10);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone:'Australia/Perth', year:'numeric', month:'2-digit', day:'2-digit'
+  }).formatToParts(new Date());
+  const y = Number(parts.find(p => p.type === 'year').value);
+  const m = Number(parts.find(p => p.type === 'month').value);
+  const d = Number(parts.find(p => p.type === 'day').value);
+  const perthCalendarDay = new Date(Date.UTC(y, m - 1, d, 12));
+  const days = (6 - perthCalendarDay.getUTCDay() + 7) % 7;
+  perthCalendarDay.setUTCDate(perthCalendarDay.getUTCDate() + days);
+  return perthCalendarDay.getUTCFullYear() + '-' +
+    String(perthCalendarDay.getUTCMonth() + 1).padStart(2,'0') + '-' +
+    String(perthCalendarDay.getUTCDate()).padStart(2,'0');
 }
 
 async function searchRaces() { return loadSaturdayCard(); }
@@ -2384,6 +2431,10 @@ async function loadSaturdayCard() {
   if (!input.value) input.value = nextSaturdayISO();
   const date = input.value;
   const container = document.getElementById('race-search-results');
+  if (!isSaturdayDateValue(date)) {
+    container.innerHTML = '<div class="alert alert-warn">Choose a Saturday race date. Selected: ' + (formatPerthDate(date) || 'invalid date') + '.</div>';
+    return;
+  }
   container.innerHTML = '<div class="text-dim text-sm">Loading Australian Saturday race card…</div>';
   try {
     const res = await fetch('/.netlify/functions/odds-api-net?action=racing&race_type=horse-racing&race_country=AU');
@@ -2790,7 +2841,7 @@ function renderAdminRaceList() {
     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--dark3); border-radius:6px; margin-bottom:8px;">
       <div>
         <div style="font-weight:600;">Race ${r.race_number} — ${r.track}</div>
-        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status}${r.odds_as_of ? ' · Sportsbet '+new Date(r.odds_as_of).toLocaleTimeString('en-AU',{timeZone:'Australia/Perth',hour:'numeric',minute:'2-digit'})+' AWST' : ''}</div>
+        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status}${r.odds_as_of ? ' · Sportsbet '+perthTime(r.odds_as_of).replace(' AWST','')+' AWST' : ''}</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="btn btn-outline btn-sm" onclick="refreshSportsbetRace('${r.id}')">↻ Odds</button>
@@ -3041,7 +3092,26 @@ function escapeHtml(str) {
 function formatTime(d) {
   if (!d) return '';
   const date = d instanceof Date ? d : new Date(d);
-  return date.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+  return new Intl.DateTimeFormat('en-AU', { timeZone:'Australia/Perth', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).format(date);
+}
+
+function logoutCurrentSession() {
+  if (state.isAdmin) {
+    sessionStorage.removeItem('fpso_admin_password');
+    sessionStorage.removeItem('raceday_admin');
+    state.isAdmin = false;
+    state.user = null;
+    state.selections = {};
+    document.getElementById('btn-admin-tab').style.display = 'none';
+  } else {
+    state.user = null;
+    state.selections = {};
+    localStorage.removeItem('raceday_user');
+  }
+  const adminBadge = document.getElementById('admin-mode-badge');
+  if (adminBadge) adminBadge.style.display = 'none';
+  document.getElementById('main-app').style.display = 'none';
+  showLanding();
 }
 
 // ============================================================
