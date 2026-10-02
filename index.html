@@ -272,6 +272,18 @@
     transform: scale(1.15);
   }
 
+  /* ===== PLAYER SELECTION LAYOUT ===== */
+  .player-races-layout { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:18px; align-items:start; }
+  .my-selections-card { position:sticky; top:92px; }
+  .my-selection-row { padding:9px 0; border-bottom:1px solid var(--mid); }
+  .my-selection-row:last-child { border-bottom:0; }
+  .my-selection-race { font-size:11px; color:var(--text-dim); margin-bottom:3px; }
+  .my-selection-pick { font-size:13px; font-weight:600; }
+  @media (max-width:850px) {
+    .player-races-layout { grid-template-columns:1fr; }
+    .my-selections-card { position:static; order:-1; }
+  }
+
   /* ===== RACE CARDS ===== */
   .race-card {
     background: var(--dark3);
@@ -962,7 +974,7 @@
 
     <div class="form-group">
       <label>Your Name</label>
-      <input type="text" id="reg-name" placeholder="First name + last initial (e.g. Kyren V)" maxlength="40">
+      <input type="text" id="reg-name" placeholder="First name + last initial" maxlength="40">
     </div>
 
     <div class="form-group">
@@ -1038,7 +1050,13 @@
       <div id="races-tbc" class="alert alert-info" style="display:none;">
         🏇 Races for this event are yet to be announced. Check back Thursday.
       </div>
-      <div id="race-list"></div>
+      <div class="player-races-layout">
+        <div id="race-list"></div>
+        <aside class="card my-selections-card" id="my-selections-card" style="display:none;">
+          <div class="card-title">🐎 My Selections</div>
+          <div id="my-selections-content"></div>
+        </aside>
+      </div>
       <div id="save-selections-bar" style="display:none; position:sticky; bottom:16px; text-align:center; padding:12px;">
         <button class="btn btn-gold" onclick="saveSelections()" style="box-shadow:0 4px 20px rgba(201,168,76,0.4);">
           ✓ Save My Selections
@@ -1885,6 +1903,32 @@ function renderRaces() {
           ` : (!isLocked && !settled && state.user ? `
             <div style="margin-top:10px; font-size:12px; color:var(--text-dim); text-align:right;">No selection yet</div>
           ` : '')}
+        </div>
+      </div>
+    `;
+  }).join('');
+  renderMySelections();
+}
+
+function renderMySelections() {
+  const card = document.getElementById('my-selections-card');
+  const content = document.getElementById('my-selections-content');
+  if (!card || !content) return;
+  if (!state.user || state.isAdmin || !state.races.length) {
+    card.style.display = 'none';
+    content.innerHTML = '';
+    return;
+  }
+  card.style.display = 'block';
+  const orderedRaces = [...state.races].sort((a, b) => new Date(a.race_time) - new Date(b.race_time));
+  content.innerHTML = orderedRaces.map((race, index) => {
+    const selectedNumber = state.selections[race.id];
+    const runner = (race.runners || []).find(r => r.number == selectedNumber);
+    return `
+      <div class="my-selection-row">
+        <div class="my-selection-race">${index + 1}. ${escapeHtml(race.track)} R${race.race_number} · ${perthTime(race.race_time)}</div>
+        <div class="my-selection-pick" style="color:${runner ? 'var(--text)' : 'var(--text-dim)'};">
+          ${runner ? '#' + runner.number + ' — ' + escapeHtml(runner.name) : 'Not selected'}
         </div>
       </div>
     `;
