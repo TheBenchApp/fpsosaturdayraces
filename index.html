@@ -1113,10 +1113,11 @@
             <input type="text" id="new-event-name" placeholder="e.g. Race Day — Week 3">
           </div>
           <div class="form-group">
-            <label>Registration Lockout</label>
+            <label>Registration Lockout (AWST / Perth)</label>
             <input type="datetime-local" id="new-event-lockout">
           </div>
-          <button class="btn btn-primary" onclick="createEvent()">Create Event</button>
+          <button type="button" class="btn btn-primary" id="create-event-btn" onclick="createRaceDayEvent()">Create Event</button>
+          <div id="create-event-status" role="status" aria-live="polite" style="display:none;margin-top:12px;overflow-wrap:anywhere;"></div>
         </div>
       </div>
 
@@ -1232,9 +1233,8 @@ loadScript('https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js', () 
 // ============================================================
 // CONFIG — UPDATE THESE BEFORE DEPLOYING
 // ============================================================
-const SUPABASE_URL = 'https://lrclsuzhhmndwkuswsnr.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyY2xzdXpoaG1uZHdrdXN3c25yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMjUzOTQsImV4cCI6MjA5NzcwMTM5NH0.US_ny_3Ec6P8KOzBYA56-n6Q0vX-bziVznURhPcfeZQ';
-const ADMIN_PASSWORD = 'FPSO123'; // Change this
+const SUPABASE_URL = 'https://utvkvajxiybyeysdhalb.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_z8I9HNyTJ6OlN-a8brT6AA_EQR4kibM';
 const APP_URL = 'https://fpsosaturdayraces.netlify.app';
 
 // ============================================================
@@ -1245,7 +1245,21 @@ function initDB() {
   try {
     if (typeof supabase !== 'undefined' && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
       const { createClient } = supabase;
-      db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { fetch: (input, options = {}) => {
+          const headers = new Headers(options.headers);
+          // These capabilities are used only by this project's Data API policies.
+          const url = typeof input === 'string' ? input : input.url;
+          if (url.startsWith(SUPABASE_URL + '/rest/v1/')) {
+            let token = localStorage.getItem('fpso_player_token');
+            if (!token) { token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', ''); localStorage.setItem('fpso_player_token', token); }
+            headers.set('x-fpso-player', token);
+            const admin = sessionStorage.getItem('fpso_admin_password');
+            if (admin) headers.set('x-fpso-admin', admin);
+          }
+          return fetch(input, { ...options, headers, signal: options.signal || AbortSignal.timeout(15000) });
+        } }
+      });
     }
   } catch(e) { console.error("Supabase init error:", e); }
 }
@@ -1291,14 +1305,19 @@ const HORSE_COLOURS = [
 async function initApp() {
   initDB();
   buildColourGrid();
-  await loadCurrentEvent();
-  checkLocalUser();
+  const loaded = await loadCurrentEvent();
+  await checkLocalUser();
+  if (!loaded) showToast('Could not load the database. Use Refresh or reload to try again.', 'danger');
   document.getElementById('app-url-input').value = APP_URL;
   const raceDateInput = document.getElementById('race-date-input'); if (raceDateInput && !raceDateInput.value) raceDateInput.value = nextSaturdayISO(); syncEventLockoutToRaceDate();
 }
 
-function checkLocalUser() {
-  if (state.isAdmin || sessionStorage.getItem('raceday_admin') === '1') {
+async function checkLocalUser() {
+  if (sessionStorage.getItem('fpso_admin_password') && db) {
+    try { await verifyAdminSession(); state.isAdmin = true; }
+    catch (error) { state.isAdmin = false; sessionStorage.removeItem('fpso_admin_password'); showToast('Admin session: ' + error.message, 'danger'); }
+  }
+  if (state.isAdmin) {
     state.isAdmin = true;
     document.getElementById('btn-admin-tab').style.display = 'block';
     showMainApp();
@@ -1326,12 +1345,7 @@ function checkLocalUser() {
 }
 
 async function loadCurrentEvent() {
-  if (!db) {
-    state.currentEvent = { id: 'demo', name: 'Race Day — Demo Week', status: 'open',
-      lockout_time: new Date(Date.now() + 86400000 * 2).toISOString() };
-    state.races = getDemoRaces();
-    return true;
-  }
+  if (!db) return false;
 
   try {
     const { data: events, error: eventError } = await db.from('events').select('*')
@@ -1357,7 +1371,7 @@ async function loadCurrentEvent() {
     state.currentEvent = currentEvent;
     state.races = races;
     state.participants = participants;
-    state.lockoutOverride = currentEvent ? localStorage.getItem('raceday_lockout_override_' + currentEvent.id) || null : null;
+    state.lockoutOverride = currentEvent?.lockout_override || null;
     return true;
   } catch (e) {
     console.error('Event load error:', e);
@@ -1545,7 +1559,7 @@ function renderEventPreview() {
 
   box.innerHTML = `
     <div style="background:var(--dark3); border-radius:8px; padding:16px; margin-bottom:12px;">
-      <div style="font-family:'Press Start 2P',monospace; font-size:22px; color:var(--gold); letter-spacing:1px;">${state.currentEvent.name}</div>
+      <div style="font-family:'Press Start 2P',monospace; font-size:22px; color:var(--gold); letter-spacing:1px;">${escapeHtml(state.currentEvent.name)}</div>
       <div style="font-size:12px; color:var(--text-dim); margin-top:4px;">
         Selections close: ${isLocked ? '<span style="color:var(--red);">LOCKED</span>' : lockout.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }) + ' AWST'}
       </div>
@@ -1647,13 +1661,13 @@ async function submitRegistration() {
     }).select().single();
 
     if (error) {
-      errEl.textContent = 'Registration failed. Please try again.';
+      errEl.textContent = 'Registration failed: ' + error.message;
       errEl.style.display = 'block';
       return;
     }
     userId = data.id;
   } else {
-    userId = 'demo_' + Date.now();
+    errEl.textContent = 'Database unavailable. No registration was saved.'; errEl.style.display = 'block'; return;
   }
 
   state.user = { id: userId, name, colour: selectedColour, event_id: state.currentEvent.id };
@@ -1701,11 +1715,15 @@ function isSelectionsLocked() {
 }
 
 async function setLockoutOverride(mode) {
-  if (!state.isAdmin) return;
-  state.lockoutOverride = mode;
-  localStorage.setItem('raceday_lockout_override_' + state.currentEvent.id, mode || '');
-  updateBanner(); renderRaces(); renderAdminCurrentEvent();
-  showToast(mode === 'open' ? 'Selections manually unlocked' : mode === 'locked' ? 'Selections manually locked' : 'Automatic lockout restored', 'success');
+  if (!state.isAdmin || !state.currentEvent || !db) return;
+  try {
+    const { data, error } = await db.from('events').update({lockout_override: mode}).eq('id', state.currentEvent.id).select().single();
+    if (error) throw error;
+    state.currentEvent = data;
+    state.lockoutOverride = data.lockout_override;
+    updateBanner(); renderRaces(); renderAdminCurrentEvent();
+    showToast(mode === 'open' ? 'Selections manually unlocked' : mode === 'locked' ? 'Selections manually locked' : 'Automatic lockout restored', 'success');
+  } catch(error) { showToast('Could not change lockout: ' + error.message, 'danger'); }
 }
 
 function updateBanner() {
@@ -1869,19 +1887,21 @@ async function saveSelections() {
   if (!state.user || !state.currentEvent) return;
   if (isSelectionsLocked()) { showToast('Selections are locked', 'warn'); renderRaces(); return; }
 
-  localStorage.setItem('raceday_selections_' + state.currentEvent.id, JSON.stringify(state.selections));
+  if (!db) { showToast('Database unavailable. Selections were not saved.', 'danger'); return; }
 
   if (db) {
     for (const [raceId, runnerNumber] of Object.entries(state.selections)) {
-      await db.from('selections').upsert({
+      const { error } = await db.from('selections').upsert({
         participant_id: state.user.id,
         race_id: raceId,
         runner_number: runnerNumber,
         event_id: state.currentEvent.id,
       }, { onConflict: 'participant_id,race_id' });
+      if (error) { showToast('Could not save selections: ' + error.message, 'danger'); return; }
     }
   }
 
+  localStorage.setItem('raceday_selections_' + state.currentEvent.id, JSON.stringify(state.selections));
   const allSelected = state.races.every(r => state.selections[r.id] != null);
   if (allSelected) {
     showToast('✅ All selections saved! You\'re in the comp.', 'success');
@@ -1929,7 +1949,7 @@ function renderLeaderboard() {
               <td>
                 <div style="display:flex; align-items:center; gap:8px;">
                   <span style="width:10px;height:10px;border-radius:50%;background:${p.colour};display:inline-block;flex-shrink:0;"></span>
-                  ${p.name}
+                  ${escapeHtml(p.name)}
                 </div>
               </td>
               <td><span class="payout-val">$${p.total.toFixed(2)}</span></td>
@@ -1997,7 +2017,7 @@ function renderAllSelections(participants) {
             <tr>
               <td>
                 <span style="width:8px;height:8px;border-radius:50%;background:${p.colour};display:inline-block;margin-right:6px;"></span>
-                ${p.name}
+                ${escapeHtml(p.name)}
               </td>
               ${state.races.map(r => {
                 const sel = p.selections[r.id];
@@ -2034,7 +2054,7 @@ function renderTracker() {
     const horseEmoji = '🐎';
     return `
       <div class="track-lane">
-        <div class="lane-name" title="${p.name}">${p.name.split(' ')[0]}</div>
+        <div class="lane-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name.split(' ')[0])}</div>
         <div class="lane-track">
           <div class="lane-horse" style="left:${pct}%; color:${p.colour}; text-shadow: 0 0 8px ${p.colour}80;">${horseEmoji}</div>
         </div>
@@ -2084,7 +2104,7 @@ function renderChatMessages() {
           🐎
         </div>
         <div class="chat-bubble ${isMe ? 'mine' : ''}">
-          ${!isMe ? `<div class="chat-sender" style="color:${msg.colour};">${msg.sender}</div>` : ''}
+          ${!isMe ? `<div class="chat-sender" style="color:${msg.colour};">${escapeHtml(msg.sender)}</div>` : ''}
           <div class="chat-text">${escapeHtml(msg.text)}</div>
           <div class="chat-time">${formatTime(msg.ts)}</div>
         </div>
@@ -2102,6 +2122,7 @@ function scrollChat() {
 
 async function sendChat() {
   if (!state.user) return;
+  if (!db) { showToast('Database unavailable. Message was not sent.', 'danger'); return; }
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
@@ -2117,12 +2138,15 @@ async function sendChat() {
   };
 
   if (db) {
-    await db.from('chat').insert({
+    const { error } = await db.from('chat').insert({
+      participant_id: state.user.id,
       event_id: state.currentEvent.id,
       participant_name: state.user.name,
       participant_colour: state.user.colour,
       message: text,
     });
+    if (error) { input.value = text; showToast('Chat was not sent: ' + error.message, 'danger'); return; }
+    await loadChatFromDB();
   } else {
     chatMessages.push(msg);
     renderChatMessages();
@@ -2130,12 +2154,13 @@ async function sendChat() {
 }
 
 async function loadChatFromDB() {
-  if (!state.currentEvent) return;
-  const { data } = await db.from('chat')
+  if (!state.currentEvent || !db) return;
+  const { data, error } = await db.from('chat')
     .select('*')
     .eq('event_id', state.currentEvent.id)
     .order('created_at', { ascending: true })
     .limit(200);
+  if (error) { showToast('Could not load chat: ' + error.message, 'danger'); return; }
 
   chatMessages = (data || []).map(m => ({
     id: m.id,
@@ -2151,7 +2176,7 @@ async function loadChatFromDB() {
 // ADMIN
 // ============================================================
 function showAdminLogin() {
-  if (state.isAdmin || sessionStorage.getItem('raceday_admin') === '1') { checkLocalUser(); return; }
+  if (state.isAdmin) { goAdmin(); return; }
   document.getElementById('admin-password').value = '';
   document.getElementById('admin-login-error').style.display = 'none';
   document.getElementById('modal-admin-login').classList.remove('hidden');
@@ -2161,21 +2186,36 @@ function hideAdminLogin() {
   document.getElementById('modal-admin-login').classList.add('hidden');
 }
 
-function adminLogin() {
-  const pw = document.getElementById('admin-password').value;
-  if (pw === ADMIN_PASSWORD) {
+let adminLoginPending = false;
+async function verifyAdminSession() {
+  if (!db) throw new Error('Database connection unavailable. Reload and try again.');
+  const { data, error } = await db.from('admin_access').select('allowed').limit(1);
+  if (error) throw new Error('Database check failed: ' + error.message);
+  if (!data?.[0]?.allowed) throw new Error('Incorrect admin password. Use the password set in the Supabase restoration script.');
+}
+async function adminLogin() {
+  if (adminLoginPending) return;
+  const password = document.getElementById('admin-password').value;
+  const errorBox = document.getElementById('admin-login-error');
+  if (!password) { errorBox.textContent = 'Enter your admin password.'; errorBox.style.display = 'block'; return; }
+  adminLoginPending = true;
+  errorBox.textContent = 'Checking admin access…'; errorBox.style.display = 'block';
+  sessionStorage.setItem('fpso_admin_password', password);
+  try {
+    await verifyAdminSession();
     state.isAdmin = true;
-    sessionStorage.setItem('raceday_admin', '1');
-    hideAdminLogin();
+    sessionStorage.removeItem('raceday_admin');
     document.getElementById('btn-admin-tab').style.display = 'block';
-
     document.getElementById('admin-password').value = '';
+    hideAdminLogin();
     showMainApp();
     goAdmin();
-    showToast('Admin access granted', 'success');
-  } else {
-    document.getElementById('admin-login-error').style.display = 'block';
-  }
+  } catch (error) {
+    sessionStorage.removeItem('fpso_admin_password');
+    state.isAdmin = false;
+    errorBox.textContent = error.message || 'Could not verify admin access. Try again.';
+    errorBox.style.display = 'block';
+  } finally { adminLoginPending = false; }
 }
 
 function renderAdminCurrentEvent() {
@@ -2191,7 +2231,7 @@ function renderAdminCurrentEvent() {
   container.innerHTML = `
     <div class="flex-between" style="margin-bottom:12px;">
       <div>
-        <div style="font-size:18px; font-weight:700;">${state.currentEvent.name}</div>
+        <div style="font-size:18px; font-weight:700;">${escapeHtml(state.currentEvent.name)}</div>
         <div class="text-sm text-dim">Lockout: ${lockout.toLocaleString('en-AU',{timeZone:'Australia/Perth'})} AWST ${isLocked ? '<span style="color:var(--red);">— LOCKED</span>' : ''}</div>
       </div>
       <span class="pill ${state.currentEvent.status === 'open' ? 'pill-green' : 'pill-grey'}">${state.currentEvent.status}</span>
@@ -2205,51 +2245,97 @@ function renderAdminCurrentEvent() {
   `;
 }
 
-async function createEvent() {
+let creatingEvent = false;
+function setCreateEventStatus(message, type = 'info') {
+  const status = document.getElementById('create-event-status');
+  status.textContent = message;
+  status.className = 'alert alert-' + type;
+  status.style.display = 'block';
+}
+
+// Avoid createEvent: inline handlers resolve that name to document.createEvent.
+async function createRaceDayEvent() {
+  if (creatingEvent) return;
   const name = document.getElementById('new-event-name').value.trim();
   const lockout = document.getElementById('new-event-lockout').value;
+  if (!state.isAdmin) { setCreateEventStatus('Sign in as admin to create an event.', 'danger'); return; }
+  if (!name || !lockout) { setCreateEventStatus('Enter an event name and lockout date/time.', 'warn'); return; }
+  const lockoutDate = new Date(lockout + '+08:00');
+  if (Number.isNaN(lockoutDate.getTime())) { setCreateEventStatus('Enter a valid lockout date/time in Perth (AWST).', 'warn'); return; }
+  if (!db) { setCreateEventStatus('Database connection unavailable. Reload the page and try again. No event was saved.', 'danger'); return; }
+  if (state.currentEvent?.status === 'open') { setCreateEventStatus('Close the current event before creating another.', 'warn'); return; }
 
-  if (!name || !lockout) {
-    showToast('Enter event name and lockout time', 'warn');
-    return;
-  }
-
-  if (db) {
-    if (state.currentEvent && state.currentEvent.status === 'open') {
-      showToast('Close the current event first', 'warn');
-      return;
-    }
+  const button = document.getElementById('create-event-btn');
+  const controller = new AbortController();
+  let timedOut = false, insertStarted = false, saved = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
+  creatingEvent = true;
+  button.disabled = true;
+  button.textContent = 'Creating…';
+  button.setAttribute('aria-busy', 'true');
+  setCreateEventStatus('Connecting to the database…');
+  try {
+    // Initialization may have failed or another admin may have opened an event.
+    const { data: existing, error: readError } = await db.from('events').select('id')
+      .eq('status', 'open').limit(1).abortSignal(controller.signal);
+    if (readError) throw readError;
+    if (existing?.length) { setCreateEventStatus('An open event already exists. Press Refresh to load it, then close it before creating another.', 'warn'); return; }
+    setCreateEventStatus('Saving event…');
+    insertStarted = true;
     const { data, error } = await db.from('events').insert({
-      name, lockout_time: new Date(lockout).toISOString(), status: 'open'
-    }).select().single();
-
-    if (error) { showToast('DB error: ' + error.message, 'danger'); console.error(error); return; }
+      name, lockout_time: lockoutDate.toISOString(), status: 'open'
+    }).select().single().abortSignal(controller.signal);
+    if (error) throw error;
+    if (!data?.id) throw new Error('The database did not return the saved event.');
+    saved = true;
     state.currentEvent = data;
     state.races = [];
-  } else {
-    state.currentEvent = { id: 'new_' + Date.now(), name, lockout_time: new Date(lockout).toISOString(), status: 'open' };
-    state.races = [];
+    state.participants = [];
+    state.selections = {};
+    state.lockoutOverride = null;
+    state.user = null;
+    localStorage.removeItem('raceday_user');
+    document.getElementById('user-badge').style.display = 'none';
+    chatMessages = [];
+    document.getElementById('new-event-name').value = '';
+    renderAdminCurrentEvent();
+    updateBanner();
+    renderRaces();
+    renderLeaderboard();
+    renderTracker();
+    setupRealtimeSubs();
+    renderChat();
+    setCreateEventStatus('Event created and saved: ' + data.name, 'success');
+  } catch (error) {
+    console.error('Create Event failed:', error);
+    const detail = timedOut ? 'The database request timed out after 15 seconds.' :
+      String(error?.message || error || 'Unknown database error');
+    const code = error?.code ? ' (code ' + error.code + ')' : '';
+    const recovery = saved ? 'The event was saved, but the display could not update. Press Refresh.' :
+      insertStarted ? 'Could not confirm the event was saved. Press Refresh before retrying to avoid a duplicate.' :
+      'No event was created. Check the database connection and try again.';
+    setCreateEventStatus(recovery + ' ' + detail + code, 'danger');
+  } finally {
+    clearTimeout(timeout);
+    creatingEvent = false;
+    button.disabled = false;
+    button.textContent = 'Create Event';
+    button.removeAttribute('aria-busy');
   }
-
-  showToast('Event created!', 'success');
-  renderAdminCurrentEvent();
-  updateBanner();
-  document.getElementById('new-event-name').value = '';
 }
 
 async function closeEvent() {
+  if (!state.isAdmin || !state.currentEvent || !db) return;
   if (!confirm('Close this event and archive all data? This cannot be undone.')) return;
-
-  if (db) {
-    await db.from('events').update({ status: 'archived' }).eq('id', state.currentEvent.id);
-  }
-
-  state.currentEvent = null;
-  state.races = [];
-  state.selections = {};
-  showToast('Event closed and archived.', 'success');
-  renderAdminCurrentEvent();
-  updateBanner();
+  try {
+    const { error } = await db.from('events').update({ status: 'archived' }).eq('id', state.currentEvent.id).select().single();
+    if (error) throw error;
+    state.currentEvent = null; state.races = []; state.selections = {}; state.participants = [];
+    state.lockoutOverride = null;
+    setupRealtimeSubs();
+    renderAdminCurrentEvent(); updateBanner(); renderRaces(); renderLeaderboard(); renderTracker();
+    showToast('Event closed and archived.', 'success');
+  } catch(error) { setCreateEventStatus('Could not close event: ' + error.message, 'danger'); }
 }
 
 let loadedRacingCard = [];
@@ -2511,7 +2597,7 @@ async function acceptGeneratedCard() {
         if (selectionError) { showToast('Could not replace card: ' + selectionError.message, 'danger'); return; }
         const { error: runnerError } = await db.from('runners').delete().eq('race_id', existing.id);
         if (runnerError) { showToast('Could not replace card: ' + runnerError.message, 'danger'); return; }
-        const { error: raceError } = await db.from('races').delete().eq('id', existing.id);
+        const { error: raceError } = await db.from('races').delete().eq('id', existing.id).select('id').single();
         if (raceError) { showToast('Could not replace card: ' + raceError.message, 'danger'); return; }
       }
     }
@@ -2532,6 +2618,7 @@ async function acceptGeneratedCard() {
 }
 
 async function addLoadedRace(apiId) {
+  if (!db || !state.isAdmin) { showToast('Admin database connection required.', 'danger'); return; }
   const r = loadedRacingCard.find(x => String(x.id) === String(apiId));
   if (!r) return;
   if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
@@ -2589,6 +2676,8 @@ async function addLoadedRace(apiId) {
   if (db) {
     const { data: savedRace, error: raceError } = await db.from('races').insert({
       event_id: state.currentEvent.id,
+      api_id: String(newRace.api_id), distance: newRace.distance || null, race_class: newRace.race_class || null,
+      odds_as_of: newRace.odds_as_of, odds_snapshot_favourite: newRace.odds_snapshot_favourite,
       name: newRace.name,
       track: newRace.track,
       race_number: newRace.race_number,
@@ -2600,6 +2689,8 @@ async function addLoadedRace(apiId) {
     newRace.id = savedRace.id;
     const runnerRows = runners.map(x => ({
       race_id: savedRace.id,
+      place_odds: x.place_odds == null ? null : Number(x.place_odds),
+      jockey: x.jockey, trainer: x.trainer, barrier: x.barrier, form: x.form, emergency: x.emergency,
       number: Number(x.number),
       name: x.name,
       odds: x.odds == null ? null : Number(x.odds),
@@ -2622,7 +2713,8 @@ async function addLoadedRace(apiId) {
 }
 
 async function refreshSportsbetRace(raceId) {
-  const race = state.races.find(x => String(x.id) === String(raceId));
+  const savedRace = state.races.find(x => String(x.id) === String(raceId));
+  const race = savedRace ? {...savedRace} : null;
   if (!race?.api_id) { showToast('No provider race ID for this race', 'warn'); return; }
   try {
     const res = await fetch('/.netlify/functions/odds-api-net?action=race_odds&event_id=' + encodeURIComponent(race.api_id));
@@ -2644,6 +2736,14 @@ async function refreshSportsbetRace(raceId) {
       race.pre_race_favourite = {...race.odds_snapshot_favourite};
       race.favourite_number = active[0].number;
     }
+    if (!db) throw new Error('Database unavailable. Refreshed prices were not saved.');
+    const { error: runnerError } = await db.from('runners').upsert(race.runners.map(r => ({...r, race_id:race.id})), {onConflict:'race_id,number'});
+    if (runnerError) throw runnerError;
+    const { error: raceError } = await db.from('races').update({odds_as_of:race.odds_as_of,
+      odds_snapshot_favourite:race.odds_snapshot_favourite, pre_race_favourite:race.pre_race_favourite || null,
+      favourite_number:race.favourite_number || null}).eq('id', race.id).select().single();
+    if (raceError) throw raceError;
+    Object.assign(savedRace, race);
     renderAdminRaceList(); renderRaces();
     showToast('Sportsbet field and prices refreshed', 'success');
   } catch(e) { showToast(e.message, 'warn'); }
@@ -2709,7 +2809,7 @@ async function removeRace(raceId) {
     if (selectionError) { showToast('Could not remove race selections: ' + selectionError.message, 'danger'); return; }
     const { error: runnerError } = await db.from('runners').delete().eq('race_id', raceId);
     if (runnerError) { showToast('Could not remove race runners: ' + runnerError.message, 'danger'); return; }
-    const { error: raceError } = await db.from('races').delete().eq('id', raceId);
+    const { error: raceError } = await db.from('races').delete().eq('id', raceId).select('id').single();
     if (raceError) { showToast('Could not remove race: ' + raceError.message, 'danger'); return; }
   }
   state.races = state.races.filter(r => String(r.id) !== String(raceId));
@@ -2788,25 +2888,14 @@ async function settleRace(raceId) {
     return;
   }
 
-  race.favourite_number = fav || null;
-  race.result_1st = pos1;
-  race.result_2nd = pos2;
-  race.result_3rd = pos3;
-  race.win_div = winDiv;
-  race.place_div = placeDiv;
-  race.status = 'settled';
-
-  if (db) {
-    await db.from('races').update({
-      favourite_number: race.favourite_number,
-      result_1st: pos1,
-      result_2nd: pos2,
-      result_3rd: pos3,
-      win_div: winDiv,
-      place_div: placeDiv,
-      status: 'settled',
-    }).eq('id', raceId);
-  }
+  const changes = { favourite_number: fav || null, result_1st: pos1, result_2nd: pos2,
+    result_3rd: pos3, win_div: winDiv, place_div: placeDiv, status: 'settled' };
+  if (!db) { showToast('Database unavailable. Result was not saved.', 'danger'); return; }
+  try {
+    const { error } = await db.from('races').update(changes).eq('id', raceId).select().single();
+    if (error) throw error;
+  } catch (error) { showToast('Could not settle race: ' + error.message, 'danger'); return; }
+  Object.assign(race, changes);
 
   showToast(`Race ${race.race_number} settled!`, 'success');
   renderSettleList();
@@ -2840,7 +2929,7 @@ function renderPaidList() {
             <span style="font-size:13px; color:var(--text-dim); min-width:20px;">${i + 1}.</span>
             <span style="width:10px;height:10px;border-radius:50%;background:${p.colour};display:inline-block;"></span>
             <div>
-              <div class="paid-name">${p.name}</div>
+              <div class="paid-name">${escapeHtml(p.name)}</div>
               <div class="text-xs text-dim">Score: $${p.total.toFixed(2)}</div>
             </div>
           </div>
@@ -2958,74 +3047,18 @@ function formatTime(d) {
 // ============================================================
 // START
 // ============================================================
+// Supabase normally returns error objects; catch rejected promises as well.
+for (const actionName of ['submitRegistration', 'saveSelections', 'sendChat', 'addLoadedRace', 'removeRace', 'acceptGeneratedCard']) {
+  const action = window[actionName];
+  window[actionName] = async function(...args) {
+    try { return await action(...args); }
+    catch (error) { console.error(actionName + ' failed:', error); showToast('Could not save: ' + (error.message || error), 'danger'); }
+  };
+}
 // app started via loadScript chain above
 
 </script>
 
-<!-- Supabase Schema Reference (paste into Supabase SQL editor)
-
-CREATE TABLE events (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  name TEXT NOT NULL,
-  status TEXT DEFAULT 'open',
-  lockout_time TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE races (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  event_id UUID REFERENCES events(id),
-  name TEXT,
-  track TEXT,
-  race_number INTEGER,
-  race_time TIMESTAMPTZ,
-  status TEXT DEFAULT 'open',
-  favourite_number INTEGER,
-  result_1st INTEGER,
-  result_2nd INTEGER,
-  result_3rd INTEGER,
-  win_div DECIMAL(8,2),
-  place_div DECIMAL(8,2),
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE runners (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  race_id UUID REFERENCES races(id),
-  number INTEGER,
-  name TEXT,
-  odds DECIMAL(8,2),
-  scratched BOOLEAN DEFAULT false
-);
-
-CREATE TABLE participants (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  event_id UUID REFERENCES events(id),
-  name TEXT NOT NULL,
-  colour TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE selections (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  participant_id UUID REFERENCES participants(id),
-  race_id UUID REFERENCES races(id),
-  event_id UUID REFERENCES events(id),
-  runner_number INTEGER,
-  UNIQUE(participant_id, race_id)
-);
-
-CREATE TABLE chat (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  event_id UUID REFERENCES events(id),
-  participant_name TEXT,
-  participant_colour TEXT,
-  message TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
--- Enable realtime on chat table in Supabase dashboard
-
--->
+<!-- Backend: restored Supabase project with explicit grants and RLS. -->
 </body>
 </html>
