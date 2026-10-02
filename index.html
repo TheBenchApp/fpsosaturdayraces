@@ -1620,6 +1620,8 @@ function proceedToRegister() {
     alert('You need to agree to the rules first.');
     return;
   }
+  selectedColour = null;
+  buildColourGrid();
   document.getElementById('modal-tcs').classList.add('hidden');
   document.getElementById('modal-register').classList.remove('hidden');
 }
