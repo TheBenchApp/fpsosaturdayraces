@@ -1236,6 +1236,7 @@ let state = {
   participants: [],    // all valid participants
   chatSub: null,
   resultsSub: null,
+  lockoutOverride: null, // null=automatic, 'open'=admin unlock, 'locked'=admin relock
 };
 
 // Horse colours for picker
@@ -1308,6 +1309,7 @@ async function loadCurrentEvent() {
 
     if (events && events.length > 0) {
       state.currentEvent = events[0];
+      state.lockoutOverride = localStorage.getItem('raceday_lockout_override_' + state.currentEvent.id) || null;
       const { data: races } = await db
         .from('races')
         .select('*, runners(*)')
@@ -1466,7 +1468,7 @@ function renderEventPreview() {
   }
 
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
   const races = state.races;
 
   box.innerHTML = `
@@ -1613,11 +1615,26 @@ function showMainApp() {
   }
 }
 
+function isSelectionsLocked() {
+  if (!state.currentEvent) return true;
+  if (state.lockoutOverride === 'open') return false;
+  if (state.lockoutOverride === 'locked') return true;
+  return new Date(state.currentEvent.lockout_time) <= new Date();
+}
+
+async function setLockoutOverride(mode) {
+  if (!state.isAdmin) return;
+  state.lockoutOverride = mode;
+  localStorage.setItem('raceday_lockout_override_' + state.currentEvent.id, mode || '');
+  updateBanner(); renderRaces(); renderAdminCurrentEvent();
+  showToast(mode === 'open' ? 'Selections manually unlocked' : mode === 'locked' ? 'Selections manually locked' : 'Automatic lockout restored', 'success');
+}
+
 function updateBanner() {
   if (!state.currentEvent) return;
   document.getElementById('banner-event-name').textContent = state.currentEvent.name;
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
   const statusEl = document.getElementById('banner-event-status');
   if (isLocked) {
     statusEl.textContent = '🔒 Selections Locked';
@@ -1688,7 +1705,7 @@ function renderRaces() {
   if (!state.currentEvent) { container.innerHTML = ''; return; }
 
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
 
   lockedMsg.style.display = isLocked ? 'block' : 'none';
   tbcMsg.style.display = state.races.length === 0 ? 'block' : 'none';
@@ -1703,7 +1720,7 @@ function renderRaces() {
         <div class="race-header">
           <div>
             <div class="race-title">Race ${race.race_number} — ${race.track}</div>
-            <div class="race-meta">${new Date(race.race_time).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: guessTimezone(race.track) })} local · ${race.runners?.length || 0} runners</div>
+            <div class="race-meta">${new Date(race.race_time).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Perth' })} AWST · ${race.runners?.length || 0} runners</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
             ${settled ? `<span class="pill pill-gold">Settled</span>` : `<span class="pill pill-green">Open</span>`}
@@ -1758,6 +1775,7 @@ function selectRunner(raceId, number) {
 
 async function saveSelections() {
   if (!state.user || !state.currentEvent) return;
+  if (isSelectionsLocked()) { showToast('Selections are locked', 'warn'); renderRaces(); return; }
 
   localStorage.setItem('raceday_selections_' + state.currentEvent.id, JSON.stringify(state.selections));
 
@@ -2073,7 +2091,7 @@ function renderAdminCurrentEvent() {
   }
 
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
 
   container.innerHTML = `
     <div class="flex-between" style="margin-bottom:12px;">
@@ -2084,6 +2102,9 @@ function renderAdminCurrentEvent() {
       <span class="pill ${state.currentEvent.status === 'open' ? 'pill-green' : 'pill-grey'}">${state.currentEvent.status}</span>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-outline btn-sm" onclick="setLockoutOverride('open')">🔓 Unlock Selections</button>
+      <button class="btn btn-outline btn-sm" onclick="setLockoutOverride('locked')">🔒 Lock Selections</button>
+      <button class="btn btn-outline btn-sm" onclick="setLockoutOverride(null)">⏱ Automatic Lockout</button>
       <button class="btn btn-danger btn-sm" onclick="closeEvent()">Close & Archive Event</button>
     </div>
   `;
