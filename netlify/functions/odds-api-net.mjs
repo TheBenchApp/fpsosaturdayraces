@@ -54,11 +54,26 @@ export default async (request) => {
       }));
       const perthDate = ts => Number.isFinite(Number(ts)) ? new Intl.DateTimeFormat("en-CA",{timeZone:"Australia/Perth",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(Number(ts)*1000)) : null;
       const dates = [...new Set(safe.map(r=>perthDate(r.race_start_time)).filter(Boolean))].sort();
-      return { name, http_status:status, error, pages:page, count:safe.length, perth_dates:dates, selected_date_count:safe.filter(r=>perthDate(r.race_start_time)===date).length, items:safe };
+      const countries = [...new Set(safe.map(r=>r.race_country).filter(Boolean))].sort();
+      const race_types = [...new Set(safe.map(r=>r.race_type).filter(Boolean))].sort();
+      const statuses = [...new Set(safe.map(r=>r.status).filter(Boolean))].sort();
+      return { name, http_status:status, error, pages:page, count:safe.length, perth_dates:dates, selected_date_count:safe.filter(r=>perthDate(r.race_start_time)===date).length, countries, race_types, statuses };
     };
     try {
       const results = await Promise.all(variants.map(fetchVariant));
-      return new Response(JSON.stringify({ date, start, end, results }), { status:200, headers:{ "content-type":"application/json", "cache-control":"no-store" } });
+      const labels = {
+        exact_au_horse:"Exact AU horse racing",
+        exact_horse_no_country:"Exact horse racing, any country",
+        exact_au_no_type:"Exact AU racing, any type",
+        exact_no_filters:"Exact date, no country/type filters",
+        wide_au_horse:"72-hour AU horse racing",
+        unbounded_au_horse:"Unbounded AU horse racing",
+        unbounded_horse:"Unbounded horse racing, any country"
+      };
+      const esc = v => String(v ?? "").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+      const rows = results.map(r => `<tr><td><strong>${esc(labels[r.name] || r.name)}</strong></td><td>${r.http_status}</td><td>${r.pages}</td><td>${r.count}</td><td><strong>${r.selected_date_count}</strong></td><td>${esc(r.perth_dates.join(", ") || "—")}</td><td>${esc(r.countries.join(", ") || "—")}</td><td>${esc(r.race_types.join(", ") || "—")}</td><td>${esc(r.statuses.join(", ") || "—")}</td><td>${esc(r.error || "—")}</td></tr>`).join("");
+      const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Racing Diagnostic</title><style>body{font-family:system-ui,-apple-system,sans-serif;margin:20px;color:#111}h1{font-size:22px}p{font-size:15px}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:900px}th,td{border:1px solid #ccc;padding:8px;text-align:left;vertical-align:top}th{background:#f3f3f3}code{background:#f5f5f5;padding:2px 4px;border-radius:4px}</style></head><body><h1>FPSO Racing Catalogue Diagnostic</h1><p>Selected Perth date: <strong>${esc(date)}</strong></p><p>This page contains summary counts only. No API key or runner data is exposed.</p><div class="wrap"><table><thead><tr><th>Probe</th><th>HTTP</th><th>Pages</th><th>Total</th><th>Selected date</th><th>Perth dates returned</th><th>Countries</th><th>Race types</th><th>Status</th><th>Error</th></tr></thead><tbody>${rows}</tbody></table></div></body></html>`;
+      return new Response(html, { status:200, headers:{ "content-type":"text/html; charset=utf-8", "cache-control":"no-store" } });
     } catch (err) {
       return new Response(JSON.stringify({ error:"Racing diagnostic failed", detail:String(err?.message || err) }), { status:502, headers:{ "content-type":"application/json" } });
     }
