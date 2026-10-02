@@ -1696,6 +1696,7 @@ function showTab(tab) {
   document.getElementById('section-' + tab).classList.add('active');
   document.getElementById('tab-' + tab).classList.add('active');
 
+  if (tab === 'races') renderRaces();
   if (tab === 'leaderboard') renderLeaderboard();
   if (tab === 'tracker') renderTracker();
   if (tab === 'chat') scrollChat();
