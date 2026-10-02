@@ -2223,7 +2223,7 @@ function renderLoadedRaces(races) {
       <div style="font-family:'Press Start 2P',monospace; color:var(--green-light); font-size:12px; margin-bottom:8px;">${escapeHtml(track)}</div>
       ${trackRaces.map(r => {
         const priority = groupPriority(r);
-        const badge = priority ? '<span class="pill pill-gold">G' + (4-priority) + '</span>' : '';
+        const badge = priority ? '<span class="pill pill-gold">G' + (4-priority) + '</span>' : (String(r.class).toUpperCase()==='LISTED' ? '<span class="pill pill-grey">LISTED</span>' : '');
         const autoBadge = r.autoSelected ? '<span class="pill pill-green">AUTO PICK</span>' : '';
         return `
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; padding:10px; background:var(--dark3); border:1px solid var(--mid); margin-bottom:7px;">
@@ -2359,6 +2359,8 @@ async function addLoadedRace(apiId) {
     race_time: r.time,
     distance: r.distance,
     race_class: r.class,
+    odds_as_of: r.odds_as_of || null,
+    pre_race_favourite: (() => { const a=runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((x,y)=>Number(x.odds)-Number(y.odds)||Number(x.number)-Number(y.number)); return a[0] ? {number:a[0].number,name:a[0].name,win_odds:a[0].odds,captured_at:r.odds_as_of||Date.now()} : null; })(),
     status: 'open',
     runners,
     result_1st:null, result_2nd:null, result_3rd:null,
