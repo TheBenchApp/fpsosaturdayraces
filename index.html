@@ -892,7 +892,8 @@
     </div>
 
     <div id="landing-btns" style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
-      <button class="btn btn-gold btn-full" onclick="showTCs()" id="btn-enter">Enter the Comp →</button>
+      <button class="btn btn-gold btn-full" onclick="showPlayerLogin()" id="btn-login-player">Player Login →</button>
+      <button class="btn btn-outline btn-full" onclick="showTCs()" id="btn-enter">Create Account & Enter →</button>
       <div style="font-size:11px; color:var(--text-dim); text-align:center;">By continuing you agree to the <button type="button" onclick="showTCs(true)" style="background:none;border:0;padding:0;color:var(--green-light);text-decoration:underline;cursor:pointer;font:inherit;">Rules & T&Cs</button></div>
     </div>
 
@@ -966,16 +967,27 @@
   </div>
 </div>
 
+<!-- Player Login Modal -->
+<div class="modal-overlay hidden" id="modal-player-login">
+  <div class="modal fade-in" style="max-width:420px;">
+    <div class="modal-title">Player Login</div>
+    <div class="modal-sub">Use your username and password to get back into your profile.</div>
+    <div class="form-group"><label>Username</label><input type="text" id="login-username" autocomplete="username" maxlength="24"></div>
+    <div class="form-group"><label>Password</label><input type="password" id="login-password" autocomplete="current-password" onkeydown="if(event.key==='Enter') playerLogin()"></div>
+    <div id="player-login-error" class="alert alert-danger" style="display:none;"></div>
+    <div style="display:flex;gap:10px;"><button class="btn btn-outline" onclick="hidePlayerLogin()">Back</button><button class="btn btn-gold" style="flex:1;justify-content:center;" onclick="playerLogin()">Login →</button></div>
+  </div>
+</div>
+
 <!-- Registration Modal -->
 <div class="modal-overlay hidden" id="modal-register">
   <div class="modal fade-in">
-    <div class="modal-title">Register</div>
-    <div class="modal-sub">One entry per person. Choose wisely.</div>
-
-    <div class="form-group">
-      <label>Your Name</label>
-      <input type="text" id="reg-name" placeholder="First name + last initial" maxlength="40">
-    </div>
+    <div class="modal-title">Create Player Account</div>
+    <div class="modal-sub">Your account stays with you across Saturdays and devices.</div>
+    <div class="form-group"><label>Username</label><input type="text" id="reg-username" placeholder="3–24 letters/numbers" maxlength="24" autocomplete="username"></div>
+    <div class="form-group"><label>Your Name</label><input type="text" id="reg-name" placeholder="First name + last initial" maxlength="40"></div>
+    <div class="form-group"><label>Password</label><input type="password" id="reg-password" placeholder="Minimum 8 characters" minlength="8" autocomplete="new-password"></div>
+    <div class="form-group"><label>Confirm Password</label><input type="password" id="reg-password-confirm" placeholder="Enter password again" minlength="8" autocomplete="new-password"></div>
 
     <div class="form-group">
       <label>Pick Your Horse Colour</label>
@@ -1338,31 +1350,31 @@ async function checkLocalUser() {
     catch (error) { state.isAdmin = false; sessionStorage.removeItem('fpso_admin_password'); showToast('Admin session: ' + error.message, 'danger'); }
   }
   if (state.isAdmin) {
-    state.isAdmin = true;
-    state.user = null;
-    state.selections = {};
+    state.user = null; state.selections = {};
     document.getElementById('btn-admin-tab').style.display = 'block';
-    showMainApp();
-    goAdmin();
-    return;
+    showMainApp(); goAdmin(); return;
   }
-  const saved = localStorage.getItem('raceday_user');
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      if (state.currentEvent && String(parsed.event_id) === String(state.currentEvent.id)) {
-        state.user = parsed;
-        showMainApp();
-      } else {
-        localStorage.removeItem('raceday_user');
-        showLanding();
-      }
-    } catch(e) {
-      localStorage.removeItem('raceday_user');
-      showLanding();
-    }
+  if (!db) { showLanding(); return; }
+  const { data: { session } } = await db.auth.getSession();
+  if (!session?.user) { localStorage.removeItem('raceday_user'); showLanding(); return; }
+  await restoreAuthenticatedPlayer(session.user);
+}
+
+async function restoreAuthenticatedPlayer(authUser) {
+  const { data: profile, error: profileError } = await db.from('player_profiles').select('*').eq('user_id', authUser.id).maybeSingle();
+  if (profileError || !profile) { await db.auth.signOut(); showLanding(); return; }
+  if (!state.currentEvent) { state.user = { account_id: authUser.id, name: profile.display_name, colour: profile.colour }; showMainApp(); return; }
+  let { data: participant, error } = await db.from('participants').select('*').eq('event_id', state.currentEvent.id).eq('account_id', authUser.id).maybeSingle();
+  if (error) { showToast('Could not restore profile: ' + error.message, 'danger'); showLanding(); return; }
+  // A permanent account is not automatically a weekly entry.
+  // Only registration/entry creation should create a participant for the current event.
+  if (participant) {
+    state.user = { id:participant.id, account_id:authUser.id, name:participant.name, colour:participant.colour, event_id:participant.event_id };
+    localStorage.setItem('raceday_user', JSON.stringify(state.user));
+    showMainApp();
   } else {
-    showLanding();
+    state.user = { account_id:authUser.id, name:profile.display_name, colour:profile.colour };
+    showMainApp();
   }
 }
 
@@ -1632,6 +1644,29 @@ function hideTCs() {
   document.getElementById('modal-landing').classList.remove('hidden');
 }
 
+function playerAuthEmail(username) {
+  return username.trim().toLowerCase() + '@players.fpso.invalid';
+}
+function showPlayerLogin() {
+  document.getElementById('modal-landing').classList.add('hidden');
+  document.getElementById('player-login-error').style.display='none';
+  document.getElementById('modal-player-login').classList.remove('hidden');
+}
+function hidePlayerLogin() {
+  document.getElementById('modal-player-login').classList.add('hidden');
+  document.getElementById('modal-landing').classList.remove('hidden');
+}
+async function playerLogin() {
+  const username=document.getElementById('login-username').value.trim().toLowerCase();
+  const password=document.getElementById('login-password').value;
+  const err=document.getElementById('player-login-error'); err.style.display='none';
+  if (!/^[a-z0-9][a-z0-9._-]{2,23}$/.test(username) || !password) { err.textContent='Enter your username and password.'; err.style.display='block'; return; }
+  const { data,error }=await db.auth.signInWithPassword({email:playerAuthEmail(username),password});
+  if(error){err.textContent='Username or password is incorrect.';err.style.display='block';return;}
+  document.getElementById('modal-player-login').classList.add('hidden');
+  await restoreAuthenticatedPlayer(data.user);
+}
+
 function proceedToRegister() {
   if (state.isAdmin) { showToast('Admin mode cannot enter the player registration flow.', 'warn'); return; }
   if (!document.getElementById('tcs-agree').checked) {
@@ -1650,55 +1685,45 @@ function backToTCs() {
 }
 
 async function submitRegistration() {
-  if (state.isAdmin) { showToast('Admin mode cannot register as a player. Log out of Admin first.', 'warn'); return; }
-  const name = document.getElementById('reg-name').value.trim();
-  const errEl = document.getElementById('reg-error');
-  errEl.style.display = 'none';
+  if (state.isAdmin) { showToast('Admin mode cannot register as a player.', 'warn'); return; }
+  const username=document.getElementById('reg-username').value.trim().toLowerCase();
+  const name=document.getElementById('reg-name').value.trim();
+  const password=document.getElementById('reg-password').value;
+  const confirm=document.getElementById('reg-password-confirm').value;
+  const errEl=document.getElementById('reg-error'); errEl.style.display='none';
+  if(!/^[a-z0-9][a-z0-9._-]{2,23}$/.test(username)){errEl.textContent='Username must be 3–24 characters using letters, numbers, dots, dashes or underscores.';errEl.style.display='block';return;}
+  if(!name||name.length<2){errEl.textContent='Please enter your name.';errEl.style.display='block';return;}
+  if(password.length<8){errEl.textContent='Password must be at least 8 characters.';errEl.style.display='block';return;}
+  if(password!==confirm){errEl.textContent='Passwords do not match.';errEl.style.display='block';return;}
+  if(!selectedColour){errEl.textContent='Please pick a horse colour.';errEl.style.display='block';return;}
+  if(!state.currentEvent||isSelectionsLocked()){errEl.textContent='Registration is closed for this event.';errEl.style.display='block';return;}
 
-  if (!name || name.length < 2) {
-    errEl.textContent = 'Please enter your name.';
-    errEl.style.display = 'block';
-    return;
+  const signup=await db.functions.invoke('player-signup',{body:{username,display_name:name,password,colour:selectedColour}});
+  if(signup.error||signup.data?.error){errEl.textContent=signup.data?.error||'Account creation failed. Please try again.';errEl.style.display='block';return;}
+  const {data:authData,error:authError}=await db.auth.signInWithPassword({email:playerAuthEmail(username),password});
+  if(authError||!authData.user){errEl.textContent='Account created, but login failed. Please use Player Login.';errEl.style.display='block';return;}
+  const uid=authData.user.id;
+
+  // Claim the existing browser-owned weekly entry when this player is upgrading from the old login system.
+  let participant=null;
+  const saved=localStorage.getItem('raceday_user');
+  if(saved){
+    try{
+      const old=JSON.parse(saved);
+      if(String(old.event_id)===String(state.currentEvent.id)&&old.name.trim().toLowerCase()===name.toLowerCase()){
+        const claim=await db.rpc('claim_legacy_participant',{p_participant_id:old.id});
+        if(!claim.error) participant=Array.isArray(claim.data) ? claim.data[0] : claim.data;
+      }
+    }catch(e){}
   }
-  if (!selectedColour) {
-    errEl.textContent = 'Please pick a horse colour.';
-    errEl.style.display = 'block';
-    return;
+  if(!participant){
+    const created=await db.from('participants').insert({event_id:state.currentEvent.id,account_id:uid,name,colour:selectedColour}).select().single();
+    if(created.error){errEl.textContent='Account created, but event entry failed: '+created.error.message;errEl.style.display='block';return;}
+    participant=created.data;
   }
-  if (!state.currentEvent) {
-    errEl.textContent = 'No active event found.';
-    errEl.style.display = 'block';
-    return;
-  }
-
-  if (isSelectionsLocked()) {
-    errEl.textContent = 'Registration is closed for this event.';
-    errEl.style.display = 'block';
-    return;
-  }
-
-  let userId;
-
-  if (db) {
-    const { data, error } = await db.from('participants').insert({
-      event_id: state.currentEvent.id,
-      name: name,
-      colour: selectedColour,
-    }).select().single();
-
-    if (error) {
-      errEl.textContent = 'Registration failed: ' + error.message;
-      errEl.style.display = 'block';
-      return;
-    }
-    userId = data.id;
-  } else {
-    errEl.textContent = 'Database unavailable. No registration was saved.'; errEl.style.display = 'block'; return;
-  }
-
-  state.user = { id: userId, name, colour: selectedColour, event_id: state.currentEvent.id };
-  localStorage.setItem('raceday_user', JSON.stringify(state.user));
-
+  state.user={id:participant.id,account_id:uid,name:participant.name,colour:participant.colour,event_id:participant.event_id};
+  localStorage.setItem('raceday_user',JSON.stringify(state.user));
+  await loadCurrentEvent();
   document.getElementById('modal-register').classList.add('hidden');
   showMainApp();
 }
@@ -3141,7 +3166,7 @@ function formatTime(d) {
   return new Intl.DateTimeFormat('en-AU', { timeZone:'Australia/Perth', hour:'2-digit', minute:'2-digit', hourCycle:'h23' }).format(date);
 }
 
-function logoutCurrentSession() {
+async function logoutCurrentSession() {
   if (state.isAdmin) {
     sessionStorage.removeItem('fpso_admin_password');
     sessionStorage.removeItem('raceday_admin');
@@ -3150,6 +3175,7 @@ function logoutCurrentSession() {
     state.selections = {};
     document.getElementById('btn-admin-tab').style.display = 'none';
   } else {
+    if (db) await db.auth.signOut();
     state.user = null;
     state.selections = {};
     localStorage.removeItem('raceday_user');
@@ -3164,7 +3190,7 @@ function logoutCurrentSession() {
 // START
 // ============================================================
 // Supabase normally returns error objects; catch rejected promises as well.
-for (const actionName of ['submitRegistration', 'saveSelections', 'sendChat', 'addLoadedRace', 'removeRace', 'acceptGeneratedCard']) {
+for (const actionName of ['submitRegistration', 'playerLogin', 'saveSelections', 'sendChat', 'addLoadedRace', 'removeRace', 'acceptGeneratedCard']) {
   const action = window[actionName];
   window[actionName] = async function(...args) {
     try { return await action(...args); }
