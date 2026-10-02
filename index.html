@@ -862,7 +862,7 @@
 
     <div id="landing-btns" style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
       <button class="btn btn-gold btn-full" onclick="showTCs()" id="btn-enter">Enter the Comp →</button>
-      <div style="font-size:11px; color:var(--text-dim); text-align:center;">By continuing you agree to the Rules & T&Cs</div>
+      <div style="font-size:11px; color:var(--text-dim); text-align:center;">By continuing you agree to the <button type="button" onclick="showTCs(true)" style="background:none;border:0;padding:0;color:var(--green-light);text-decoration:underline;cursor:pointer;font:inherit;">Rules & T&Cs</button></div>
     </div>
 
     <div style="text-align:center; margin-top:16px;">
@@ -1508,9 +1508,15 @@ function guessTimezone(track) {
   return 'Australia/Sydney';
 }
 
-function showTCs() {
+let tcsViewOnly = false;
+function showTCs(viewOnly = false) {
+  tcsViewOnly = viewOnly;
   document.getElementById("modal-landing").classList.add("hidden");
   document.getElementById("modal-tcs").classList.remove("hidden");
+  const agree = document.getElementById("tcs-agree");
+  const proceed = document.querySelector('#modal-tcs button[onclick="proceedToRegister()"]');
+  if (agree) agree.closest("label").style.display = viewOnly ? "none" : "";
+  if (proceed) proceed.style.display = viewOnly ? "none" : "";
 }
 
 function hideTCs() {
@@ -2072,9 +2078,11 @@ function adminLogin() {
     hideAdminLogin();
     document.getElementById('btn-admin-tab').style.display = 'block';
 
-    if (document.getElementById('main-app').style.display === 'none') {
-      showMainApp();
-    }
+    document.getElementById('modal-landing').classList.add('hidden');
+    document.getElementById('modal-tcs').classList.add('hidden');
+    document.getElementById('modal-register').classList.add('hidden');
+    document.getElementById('main-app').style.display = 'block';
+    updateBanner();
     goAdmin();
     showToast('Admin access granted', 'success');
   } else {
