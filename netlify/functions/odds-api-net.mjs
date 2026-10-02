@@ -56,8 +56,7 @@ export default async (request) => {
       return { name, http_status:status, error, pages:page, count:safe.length, perth_dates:dates, selected_date_count:safe.filter(r=>perthDate(r.race_start_time)===date).length, items:safe };
     };
     try {
-      const results = [];
-      for (const v of variants) results.push(await fetchVariant(v));
+      const results = await Promise.all(variants.map(fetchVariant));
       return new Response(JSON.stringify({ date, start, end, results }), { status:200, headers:{ "content-type":"application/json", "cache-control":"no-store" } });
     } catch (err) {
       return new Response(JSON.stringify({ error:"Racing diagnostic failed", detail:String(err?.message || err) }), { status:502, headers:{ "content-type":"application/json" } });
