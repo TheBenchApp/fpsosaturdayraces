@@ -2187,10 +2187,10 @@ let chatMessages = [];
 function renderChat() {
   const lockedMsg = document.getElementById('chat-locked-msg');
   const inputRow = document.getElementById('chat-input-row');
-  const canChat = !!state.user?.id && !state.isAdmin;
+  const canChat = state.isAdmin || !!state.user?.id;
   lockedMsg.style.display = canChat ? 'none' : 'block';
   inputRow.style.display = canChat ? 'flex' : 'none';
-  lockedMsg.textContent = state.isAdmin ? '🔒 Admin mode can view chat but cannot post.' : '🔒 Enter this event to join the chat.';
+  lockedMsg.textContent = '🔒 Enter this event to join the chat.';
 
   if (!db) {
     chatMessages = [
@@ -2214,7 +2214,7 @@ function renderChatMessages() {
   }
 
   container.innerHTML = chatMessages.map(msg => {
-    const isMe = state.user && msg.sender === state.user.name;
+    const isMe = state.isAdmin ? msg.sender === 'ADMIN' : (state.user && msg.sender === state.user.name);
     return `
       <div class="chat-msg ${isMe ? 'mine' : ''}">
         <div class="chat-avatar" style="background:${msg.colour}22; border:1px solid ${msg.colour}44;">
@@ -2238,37 +2238,32 @@ function scrollChat() {
 }
 
 async function sendChat() {
-  if (state.isAdmin) { showToast('Admin mode cannot post as a player.', 'warn'); return; }
-  if (!state.user) return;
+  const isAdminMessage = state.isAdmin;
+  if (!isAdminMessage && !state.user?.id) return;
+  if (!state.currentEvent) { showToast('No active event for chat.', 'warn'); return; }
   if (!db) { showToast('Database unavailable. Message was not sent.', 'danger'); return; }
   const input = document.getElementById('chat-input');
   const text = input.value.trim();
   if (!text) return;
 
+  const senderName = isAdminMessage ? 'ADMIN' : state.user.name;
+  const senderColour = isAdminMessage ? '#f1c40f' : state.user.colour;
+  const participantId = isAdminMessage ? null : state.user.id;
   input.value = '';
 
-  const msg = {
-    id: Date.now(),
-    sender: state.user.name,
-    colour: state.user.colour,
-    text,
-    ts: new Date(),
-  };
-
-  if (db) {
-    const { error } = await db.from('chat').insert({
-      participant_id: state.user.id,
-      event_id: state.currentEvent.id,
-      participant_name: state.user.name,
-      participant_colour: state.user.colour,
-      message: text,
-    });
-    if (error) { input.value = text; showToast('Chat was not sent: ' + error.message, 'danger'); return; }
-    await loadChatFromDB();
-  } else {
-    chatMessages.push(msg);
-    renderChatMessages();
+  const { error } = await db.from('chat').insert({
+    participant_id: participantId,
+    event_id: state.currentEvent.id,
+    participant_name: senderName,
+    participant_colour: senderColour,
+    message: text,
+  });
+  if (error) {
+    input.value = text;
+    showToast('Chat was not sent: ' + error.message, 'danger');
+    return;
   }
+  await loadChatFromDB();
 }
 
 async function loadChatFromDB() {
