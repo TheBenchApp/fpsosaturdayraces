@@ -2504,7 +2504,7 @@ function renderSettleList() {
       <div class="settle-grid" style="margin-bottom:10px;">
         <div class="form-group" style="margin:0;">
           <label>Favourite # (pre-race)</label>
-          <input type="number" id="fav-${race.id}" placeholder="e.g. 4" min="1" max="24">
+          <input type="number" id="fav-${race.id}" placeholder="auto from near-jump odds" min="1" max="24">
         </div>
         <div></div>
         <div class="form-group" style="margin:0;">
@@ -2539,7 +2539,8 @@ async function settleRace(raceId) {
   const race = state.races.find(r => r.id === raceId);
   if (!race) return;
 
-  const fav = parseInt(document.getElementById(`fav-${raceId}`).value);
+  const favInput = parseInt(document.getElementById(`fav-${raceId}`).value);
+  const fav = favInput || race.pre_race_favourite?.number || race.odds_snapshot_favourite?.number || null;
   const pos1 = parseInt(document.getElementById(`pos1-${raceId}`).value);
   const pos2 = parseInt(document.getElementById(`pos2-${raceId}`).value);
   const pos3 = parseInt(document.getElementById(`pos3-${raceId}`).value) || null;
