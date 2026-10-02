@@ -742,6 +742,8 @@
     .modal { width:100%; max-width:100% !important; padding:14px; margin:8px auto; }
     .fpso-logo-main { width:100%; max-height:32vh; margin-bottom:12px; }
     .fpso-logo-header { width:58px; height:40px; }
+    .race-draft-layout { grid-template-columns:1fr !important; }
+    .race-draft-layout > .card { position:static !important; order:-1; }
   }
 
   /* ===== SCROLLBAR ===== */
@@ -1136,9 +1138,15 @@
             <button class="btn btn-gold btn-sm" id="auto-card-btn" onclick="autoGenerateCard()" style="display:none;">⚡ Auto Generate 10</button>
             <button class="btn btn-primary btn-sm" id="accept-auto-btn" onclick="acceptGeneratedCard()" style="display:none;">✓ Accept Card</button>
             <button class="btn btn-outline btn-sm" id="regen-auto-btn" onclick="autoGenerateCard()" style="display:none;">↻ Generate Another</button>
-            <button class="btn btn-outline btn-sm" id="clear-auto-btn" onclick="clearGeneratedCard()" style="display:none;">Edit Manually</button>
+            <button class="btn btn-outline btn-sm" id="clear-auto-btn" onclick="editGeneratedCard()" style="display:none;">Edit Manually</button>
           </div>
-          <div id="race-search-results"></div>
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 230px;gap:14px;align-items:start;" class="race-draft-layout">
+            <div id="race-search-results"></div>
+            <div class="card" style="position:sticky;top:90px;padding:12px;margin-top:14px;">
+              <div style="font-family:'Press Start 2P',monospace;font-size:10px;margin-bottom:8px;">Selected Card</div>
+              <div id="draft-card-summary"><div class="text-dim text-sm">No races selected.</div></div>
+            </div>
+          </div>
         </div>
 
         <div class="card">
@@ -1287,11 +1295,25 @@ async function initApp() {
 }
 
 function checkLocalUser() {
+  if (sessionStorage.getItem('raceday_admin') === '1') {
+    state.isAdmin = true;
+    document.getElementById('btn-admin-tab').style.display = 'block';
+    document.getElementById('main-app').style.display = 'block';
+    document.getElementById('modal-landing').classList.add('hidden');
+    updateBanner(); goAdmin();
+    return;
+  }
   const saved = localStorage.getItem('raceday_user');
   if (saved) {
     try {
-      state.user = JSON.parse(saved);
-      showMainApp();
+      const parsed = JSON.parse(saved);
+      if (state.currentEvent && String(parsed.event_id) === String(state.currentEvent.id)) {
+        state.user = parsed;
+        showMainApp();
+      } else {
+        localStorage.removeItem('raceday_user');
+        showLanding();
+      }
     } catch(e) {
       localStorage.removeItem('raceday_user');
       showLanding();
@@ -1599,7 +1621,7 @@ async function submitRegistration() {
     userId = 'demo_' + Date.now();
   }
 
-  state.user = { id: userId, name, colour: selectedColour };
+  state.user = { id: userId, name, colour: selectedColour, event_id: state.currentEvent.id };
   localStorage.setItem('raceday_user', JSON.stringify(state.user));
 
   document.getElementById('modal-register').classList.add('hidden');
@@ -2093,6 +2115,7 @@ function adminLogin() {
   const pw = document.getElementById('admin-password').value;
   if (pw === ADMIN_PASSWORD) {
     state.isAdmin = true;
+    sessionStorage.setItem('raceday_admin', '1');
     hideAdminLogin();
     document.getElementById('btn-admin-tab').style.display = 'block';
 
@@ -2310,7 +2333,7 @@ function renderLoadedRaces(races) {
               <div style="font-weight:700;">R${escapeHtml(String(r.race_number || '?'))} · ${escapeHtml(r.name)} ${badge} ${autoBadge}</div>
               <div class="text-xs text-dim">${perthTime(r.time)}${r.distance ? ' · '+escapeHtml(String(r.distance))+'m' : ''} · ${escapeHtml(String(r.active_runners ?? r.runners.length))} active runners${r.scratched_runners ? ' · '+escapeHtml(String(r.scratched_runners))+' scratched' : ''}</div>
             </div>
-            <button class="btn ${r.autoSelected ? 'btn-gold' : 'btn-primary'} btn-sm" onclick="addLoadedRace('${escapeHtml(String(r.id || ''))}')">${r.autoSelected ? '✓ Add Pick' : '+ Add'}</button>
+            <button class="btn ${r.autoSelected ? 'btn-gold' : 'btn-primary'} btn-sm" onclick="toggleDraftRace('${escapeHtml(String(r.id || ''))}')">${r.autoSelected ? '✓ Selected' : '+ Select'}</button>
           </div>`;
       }).join('')}
     </div>
@@ -2383,10 +2406,43 @@ function autoGenerateCard() {
   }
   loadedRacingCard.forEach(r=>r.autoSelected=used.has(r.id));
   renderLoadedRaces(loadedRacingCard);
+  renderDraftSummary();
   document.getElementById('clear-auto-btn').style.display='inline-flex';
   document.getElementById('accept-auto-btn').style.display=chosen.length===10 ? 'inline-flex' : 'none';
   document.getElementById('regen-auto-btn').style.display='inline-flex';
   if (chosen.length===10) showToast('10-race draft generated — max 2 races per track', 'success');
+}
+
+function editGeneratedCard() {
+  document.getElementById('accept-auto-btn').style.display='inline-flex';
+  document.getElementById('regen-auto-btn').style.display='inline-flex';
+  document.getElementById('clear-auto-btn').style.display='none';
+  renderLoadedRaces(loadedRacingCard);
+  renderDraftSummary();
+  showToast('Manual edit mode — tap selected races to remove or other races to add', 'success');
+}
+
+function toggleDraftRace(apiId) {
+  const r = loadedRacingCard.find(x => String(x.id) === String(apiId));
+  if (!r) return;
+  if (r.autoSelected) r.autoSelected = false;
+  else {
+    const selected = loadedRacingCard.filter(x=>x.autoSelected);
+    if (selected.length >= 10) { showToast('Remove a selected race before adding another', 'warn'); return; }
+    const sameTrack = selected.filter(x => String(x.track).toLowerCase() === String(r.track).toLowerCase()).length;
+    if (sameTrack >= 2) { showToast('Auto/manual draft is limited to 2 races per track', 'warn'); return; }
+    r.autoSelected = true;
+  }
+  renderLoadedRaces(loadedRacingCard);
+  renderDraftSummary();
+  document.getElementById('accept-auto-btn').style.display = loadedRacingCard.filter(x=>x.autoSelected).length===10 ? 'inline-flex' : 'none';
+}
+
+function renderDraftSummary() {
+  const box = document.getElementById('draft-card-summary');
+  if (!box) return;
+  const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>new Date(a.time)-new Date(b.time));
+  box.innerHTML = picks.length ? picks.map((r,i)=>`<div style="padding:7px 0;border-bottom:1px solid var(--mid);font-size:12px;"><strong>${i+1}.</strong> ${escapeHtml(r.track)} R${escapeHtml(String(r.race_number||'?'))}<br><span class="text-dim">${perthTime(r.time)} · ${escapeHtml(r.name)}</span></div>`).join('') : '<div class="text-dim text-sm">No races selected.</div>';
 }
 
 function clearGeneratedCard() {
