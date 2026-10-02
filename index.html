@@ -1106,11 +1106,16 @@
           <div class="card-title">Add Race</div>
           <div class="alert alert-info">Races must be added before registration lockout. Publish by Thursday.</div>
           <div class="form-group">
-            <label>Search by Track or Race Name</label>
-            <div style="display:flex; gap:8px;">
-              <input type="text" id="race-search-input" placeholder="e.g. Flemington, Eagle Farm...">
-              <button class="btn btn-primary btn-sm" onclick="searchRaces()">Search</button>
+            <label>Saturday Race Card</label>
+            <div style="display:grid; grid-template-columns:1fr auto; gap:8px;">
+              <input type="date" id="race-date-input">
+              <button class="btn btn-primary btn-sm" onclick="loadSaturdayCard()">Load AU Card</button>
             </div>
+            <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds · times shown in Perth (AWST). Free PuntersEdge acceptances are available up to 3 days ahead.</div>
+          </div>
+          <div class="form-group">
+            <label>Filter loaded card</label>
+            <input type="text" id="race-search-input" placeholder="Track or race name..." oninput="filterLoadedRaces()">
           </div>
           <div id="race-search-results"></div>
         </div>
@@ -1198,7 +1203,6 @@ loadScript('https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js', () 
 const SUPABASE_URL = 'https://lrclsuzhhmndwkuswsnr.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyY2xzdXpoaG1uZHdrdXN3c25yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMjUzOTQsImV4cCI6MjA5NzcwMTM5NH0.US_ny_3Ec6P8KOzBYA56-n6Q0vX-bziVznURhPcfeZQ';
 const ADMIN_PASSWORD = 'FPSO123'; // Change this
-const ODDSPRO_API_KEY = 'YOUR_ODDSPRO_API_KEY'; // from oddspro.com.au
 const APP_URL = 'https://fpsosaturdayraces.netlify.app';
 
 // ============================================================
@@ -1257,6 +1261,7 @@ async function initApp() {
   await loadCurrentEvent();
   checkLocalUser();
   document.getElementById('app-url-input').value = APP_URL;
+  const raceDateInput = document.getElementById('race-date-input'); if (raceDateInput && !raceDateInput.value) raceDateInput.value = nextSaturdayISO();
 }
 
 function checkLocalUser() {
@@ -2104,67 +2109,136 @@ async function closeEvent() {
   updateBanner();
 }
 
-async function searchRaces() {
-  const query = document.getElementById('race-search-input').value.trim();
+let loadedRacingCard = [];
+
+function perthTime(iso) {
+  if (!iso) return 'TBC';
+  return new Intl.DateTimeFormat('en-AU', {
+    timeZone:'Australia/Perth', hour:'numeric', minute:'2-digit', hour12:true
+  }).format(new Date(iso)) + ' AWST';
+}
+
+function nextSaturdayISO() {
+  const now = new Date();
+  const perth = new Date(now.toLocaleString('en-US', { timeZone:'Australia/Perth' }));
+  const days = (6 - perth.getDay() + 7) % 7;
+  perth.setDate(perth.getDate() + days);
+  return perth.toISOString().slice(0,10);
+}
+
+async function searchRaces() { return loadSaturdayCard(); }
+
+async function loadSaturdayCard() {
+  const input = document.getElementById('race-date-input');
+  if (!input.value) input.value = nextSaturdayISO();
+  const date = input.value;
   const container = document.getElementById('race-search-results');
+  container.innerHTML = '<div class="text-dim text-sm">Loading Australian thoroughbred acceptances…</div>';
 
-  if (!query) return;
+  try {
+    const res = await fetch('/.netlify/functions/racing-api?action=acceptances&date=' + encodeURIComponent(date));
+    const payload = await res.json();
+    if (!res.ok || !payload.ok) throw new Error(payload.error || 'Racing API request failed');
 
-  container.innerHTML = '<div class="text-dim text-sm">Searching...</div>';
+    const raw = payload.data || {};
+    const meetings = raw.meetings || raw.data || [];
+    loadedRacingCard = [];
 
-  if (!db || ODDSPRO_API_KEY === 'YOUR_ODDSPRO_API_KEY') {
-    // Demo results
-    container.innerHTML = `
-      <div class="alert alert-info" style="margin-top:10px;">Demo mode — showing sample results. Connect oddspro API key to search live races.</div>
-      <div style="margin-top:10px;">
-        ${[
-          { id: 'api_r1', name: 'Race 5 — Flemington', track: 'Flemington', time: '2:30pm AEST', runners: 12 },
-          { id: 'api_r2', name: 'Race 3 — Eagle Farm', track: 'Eagle Farm', time: '3:00pm AEST', runners: 10 },
-          { id: 'api_r3', name: 'Race 7 — Ascot', track: 'Ascot', time: '3:45pm AWST', runners: 14 },
-        ].map(r => `
-          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--dark3); border-radius:6px; margin-bottom:8px;">
-            <div>
-              <div style="font-weight:600;">${r.name}</div>
-              <div class="text-xs text-dim">${r.time} · ${r.runners} runners</div>
-            </div>
-            <button class="btn btn-primary btn-sm" onclick="addRaceToEvent('${r.id}', '${r.name}', '${r.track}')">+ Add</button>
-          </div>
-        `).join('')}
-      </div>
-    `;
+    for (const meeting of meetings) {
+      const track = meeting.venue || meeting.track || meeting.name || 'Unknown track';
+      const races = meeting.races || meeting.events || [];
+      for (const race of races) {
+        const runners = race.runners || race.acceptances || [];
+        loadedRacingCard.push({
+          id: race.race_id || race.id,
+          track,
+          race_number: race.race_number || race.number,
+          name: race.race_name || race.name || ('Race ' + (race.race_number || race.number || '')),
+          time: race.start_time || race.startTime || race.advertised_start,
+          distance: race.distance || race.distance_metres || null,
+          class: race.group || race.grade || race.class || race.race_class || '',
+          runners
+        });
+      }
+    }
+
+    renderLoadedRaces(loadedRacingCard);
+  } catch (e) {
+    container.innerHTML = '<div class="alert alert-danger">' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function filterLoadedRaces() {
+  const q = (document.getElementById('race-search-input').value || '').trim().toLowerCase();
+  renderLoadedRaces(!q ? loadedRacingCard : loadedRacingCard.filter(r =>
+    (r.track + ' ' + r.name + ' ' + r.class).toLowerCase().includes(q)
+  ));
+}
+
+function renderLoadedRaces(races) {
+  const container = document.getElementById('race-search-results');
+  if (!races.length) {
+    container.innerHTML = '<div class="text-dim text-sm">No races found for this date/filter.</div>';
     return;
   }
 
-  try {
-    const res = await fetch(`https://oddspro.com.au/api/external/meetings?type=T&location=domestic`, {
-      headers: { 'Authorization': `Bearer ${ODDSPRO_API_KEY}` }
-    });
-    const json = await res.json();
-    const meetings = json.data || [];
+  const byTrack = races.reduce((a,r) => ((a[r.track] ||= []).push(r), a), {});
+  container.innerHTML = Object.entries(byTrack).map(([track, trackRaces]) => `
+    <div style="margin-top:14px;">
+      <div style="font-family:'Press Start 2P',monospace; color:var(--green-light); font-size:12px; margin-bottom:8px;">${escapeHtml(track)}</div>
+      ${trackRaces.map(r => {
+        const badge = r.class && /group|g[123]/i.test(String(r.class)) ? '<span class="pill pill-gold">' + escapeHtml(String(r.class)) + '</span>' : '';
+        return `
+          <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; padding:10px; background:var(--dark3); border:1px solid var(--mid); margin-bottom:7px;">
+            <div>
+              <div style="font-weight:700;">R${escapeHtml(String(r.race_number || '?'))} · ${escapeHtml(r.name)} ${badge}</div>
+              <div class="text-xs text-dim">${perthTime(r.time)}${r.distance ? ' · '+escapeHtml(String(r.distance))+'m' : ''} · ${r.runners.length} runners</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="addLoadedRace('${escapeHtml(String(r.id || ''))}')">+ Add</button>
+          </div>`;
+      }).join('')}
+    </div>
+  `).join('');
+}
 
-    const filtered = meetings.filter(m =>
-      m.track?.toLowerCase().includes(query.toLowerCase())
-    );
+async function addLoadedRace(apiId) {
+  const r = loadedRacingCard.find(x => String(x.id) === String(apiId));
+  if (!r) return;
+  if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
+  if (state.races.length >= 10) { showToast('Competition card is limited to 10 races', 'warn'); return; }
+  if (state.races.some(x => String(x.api_id) === String(r.id))) { showToast('That race is already on the card', 'warn'); return; }
 
-    if (!filtered.length) {
-      container.innerHTML = '<div class="text-dim text-sm">No meetings found for that track.</div>';
-      return;
-    }
+  const runners = (r.runners || []).map(x => ({
+    number: x.runner_number || x.number || x.saddlecloth || x.tab_number,
+    name: x.horse_name || x.runner_name || x.name || 'Runner',
+    jockey: x.jockey || x.jockey_name || '',
+    trainer: x.trainer || x.trainer_name || '',
+    barrier: x.barrier || null,
+    scratched: Boolean(x.scratched || x.is_scratched || x.status === 'scratched'),
+    odds: x.win_odds || x.win_price || x.odds || null,
+    place_odds: x.place_odds || x.place_price || null
+  }));
 
-    container.innerHTML = filtered.flatMap(m =>
-      (m.races || []).map(r => `
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:10px; background:var(--dark3); border-radius:6px; margin-bottom:8px;">
-          <div>
-            <div style="font-weight:600;">Race ${r.number} — ${m.track}</div>
-            <div class="text-xs text-dim">${new Date(r.startTime).toLocaleTimeString('en-AU', { hour:'2-digit', minute:'2-digit', timeZone: guessTimezone(m.track) })} · ${(r.runners||[]).length} runners</div>
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="addRaceFromAPI(${JSON.stringify({id:r.id,name:`Race ${r.number}`,track:m.track,time:r.startTime,runners:r.runners}).replace(/"/g,'&quot;')})">+ Add</button>
-        </div>
-      `)
-    ).join('');
-  } catch(e) {
-    container.innerHTML = '<div class="alert alert-danger">API error. Check your oddspro API key.</div>';
-  }
+  const newRace = {
+    id: 'race_' + Date.now(),
+    api_id: r.id,
+    event_id: state.currentEvent.id,
+    name: r.name,
+    track: r.track,
+    race_number: r.race_number,
+    race_time: r.time,
+    distance: r.distance,
+    race_class: r.class,
+    status: 'open',
+    runners,
+    result_1st:null, result_2nd:null, result_3rd:null,
+    win_div:null, place_div:null, favourite_number:null
+  };
+
+  state.races.push(newRace);
+  showToast('R' + r.race_number + ' ' + r.track + ' added', 'success');
+  renderAdminRaceList();
+  renderRaces();
 }
 
 async function addRaceToEvent(apiId, name, track) {
