@@ -2327,10 +2327,32 @@ async async function acceptGeneratedCard() {
   const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>(new Date(a.time||0))-(new Date(b.time||0)));
   if (picks.length !== 10) { showToast('Generate a 10-race draft first', 'warn'); return; }
   if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
-  state.races = [];
-  for (const r of picks) await addLoadedRace(String(r.id));
-  clearGeneratedCard();
-  showToast('10-race card accepted', 'success');
+  if (state.races.length) {
+    if (!confirm('Replace the current race card with this generated 10-race card?')) return;
+    if (db) {
+      for (const existing of [...state.races]) {
+        const { error: selectionError } = await db.from('selections').delete().eq('race_id', existing.id);
+        if (selectionError) { showToast('Could not replace card: ' + selectionError.message, 'danger'); return; }
+        const { error: runnerError } = await db.from('runners').delete().eq('race_id', existing.id);
+        if (runnerError) { showToast('Could not replace card: ' + runnerError.message, 'danger'); return; }
+        const { error: raceError } = await db.from('races').delete().eq('id', existing.id);
+        if (raceError) { showToast('Could not replace card: ' + raceError.message, 'danger'); return; }
+      }
+    }
+    state.races = [];
+  }
+  let added = 0;
+  for (const r of picks) {
+    const before = state.races.length;
+    await addLoadedRace(String(r.id));
+    if (state.races.length > before) added++;
+  }
+  if (added === 10) {
+    clearGeneratedCard();
+    showToast('10-race card accepted and saved', 'success');
+  } else {
+    showToast('Only ' + added + ' of 10 races saved. Review the card before publishing.', 'warn');
+  }
 }
 
 async function addLoadedRace(apiId) {
