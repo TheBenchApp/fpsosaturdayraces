@@ -2241,9 +2241,9 @@ function renderLoadedRaces(races) {
 
 function groupPriority(r) {
   const s = (String(r.class || '') + ' ' + String(r.conditions || '') + ' ' + String(r.name || '')).toUpperCase();
-  if (/\\b(GROUP\\s*1|G1)\\b/.test(s)) return 3;
-  if (/\\b(GROUP\\s*2|G2)\\b/.test(s)) return 2;
-  if (/\\b(GROUP\\s*3|G3)\\b/.test(s)) return 1;
+  if (/\b(GROUP\s*1|G1)\b/.test(s)) return 3;
+  if (/\b(GROUP\s*2|G2)\b/.test(s)) return 2;
+  if (/\b(GROUP\s*3|G3)\b/.test(s)) return 1;
   return 0;
 }
 
@@ -2360,7 +2360,7 @@ async function addLoadedRace(apiId) {
     distance: r.distance,
     race_class: r.class,
     odds_as_of: r.odds_as_of || null,
-    pre_race_favourite: (() => { const a=runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((x,y)=>Number(x.odds)-Number(y.odds)||Number(x.number)-Number(y.number)); return a[0] ? {number:a[0].number,name:a[0].name,win_odds:a[0].odds,captured_at:r.odds_as_of||Date.now()} : null; })(),
+    odds_snapshot_favourite: (() => { const a=runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((x,y)=>Number(x.odds)-Number(y.odds)||Number(x.number)-Number(y.number)); return a[0] ? {number:a[0].number,name:a[0].name,win_odds:a[0].odds,captured_at:r.odds_as_of||Date.now()} : null; })(),
     status: 'open',
     runners,
     result_1st:null, result_2nd:null, result_3rd:null,
