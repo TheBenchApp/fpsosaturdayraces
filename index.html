@@ -1314,6 +1314,27 @@ async function loadCurrentEvent() {
         .eq('event_id', state.currentEvent.id)
         .order('race_time', { ascending: true });
       state.races = races || [];
+
+      // Load the live field and each participant's selections for leaderboard/tracker.
+      const { data: participants, error: participantError } = await db
+        .from('participants')
+        .select('*')
+        .eq('event_id', state.currentEvent.id);
+      if (participantError) console.error('Participant load error:', participantError);
+      const { data: selections, error: selectionError } = await db
+        .from('selections')
+        .select('*')
+        .eq('event_id', state.currentEvent.id);
+      if (selectionError) console.error('Selection load error:', selectionError);
+
+      const byParticipant = {};
+      (selections || []).forEach(sel => {
+        (byParticipant[sel.participant_id] ||= {})[sel.race_id] = sel.runner_number;
+      });
+      state.participants = (participants || []).map(p => ({
+        ...p,
+        selections: byParticipant[p.id] || {}
+      }));
     }
   } catch(e) {
     console.error('DB error:', e);
