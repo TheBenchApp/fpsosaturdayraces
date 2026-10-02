@@ -2117,6 +2117,16 @@ async function closeEvent() {
 
 let loadedRacingCard = [];
 
+function acceptanceTimeISO(date, localTime) {
+  if (!date || !localTime) return null;
+  const m = String(localTime).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return null;
+  let h = Number(m[1]) % 12;
+  if (m[3].toUpperCase() === 'PM') h += 12;
+  // Perth is UTC+8 year-round. Store a real ISO instant so sorting/display is deterministic.
+  return date + 'T' + String(h).padStart(2,'0') + ':' + m[2] + ':00+08:00';
+}
+
 function perthTime(iso) {
   if (!iso) return 'TBC';
   return new Intl.DateTimeFormat('en-AU', {
@@ -2156,12 +2166,13 @@ async function loadSaturdayCard() {
       for (const race of races) {
         const runners = race.runners || race.acceptances || [];
         loadedRacingCard.push({
-          id: race.race_id || race.id,
+          id: race.race_id || race.id || [date, meeting.venue_id || track, race.race_number || race.number].join('::'),
           track,
           race_number: race.race_number || race.number,
           name: race.race_name || race.name || ('Race ' + (race.race_number || race.number || '')),
-          time: race.start_time || race.startTime || race.advertised_start || race.local_start_time || race.local_time || race.start_time_local || race.time,
-          distance: race.distance_metres || race.distance || null,
+          time: race.start_time || race.startTime || race.advertised_start || acceptanceTimeISO(date, race.start_time_local) || null,
+          local_time: race.start_time_local || null,
+          distance: race.distance_m || race.distance_metres || race.distance || null,
           class: race.group || race.grade || race.class || race.race_class || race.conditions || '',
           conditions: race.conditions || race.conditions_line || '',
           prize: race.prize_total || race.prizemoney || null,
@@ -2302,7 +2313,7 @@ async function addLoadedRace(apiId) {
     scratched: Boolean(x.scratched || x.is_scratched || x.status === 'scratched'),
     odds: x.win_odds || x.win_price || x.odds || null,
     place_odds: x.place_odds || x.place_price || null,
-    form: x.last_10 || x.last10 || x.form || '',
+    form: x.last10 || x.last_10 || x.form || '',
     emergency: Boolean(x.emergency),
     runner_ref: x.runner_ref || null,
     scratching: x.scratching || null
