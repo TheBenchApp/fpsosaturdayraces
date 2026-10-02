@@ -5,28 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Race Day — Work Horse Racing Comp</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
 
   :root {
-    --green: #2D7A4F;
-    --green-light: #3a9d65;
-    --green-dark: #1e5435;
-    --gold: #C9A84C;
-    --gold-light: #e8c96a;
-    --cream: #F7F3E9;
-    --dirt: #8B6914;
-    --chalk: #FFFFFF;
-    --dark: #0F1A13;
-    --dark2: #1a2d1f;
-    --dark3: #243329;
-    --mid: #3d5c46;
-    --muted: #7a9e84;
-    --text: #e8f0ea;
-    --text-dim: #8aad90;
-    --red: #c0392b;
-    --blue: #2980b9;
-    --radius: 8px;
-    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+    --green: #174A87;
+    --green-light: #55C6DF;
+    --green-dark: #102E59;
+    --gold: #C93F38;
+    --gold-light: #E95A50;
+    --cream: #F5D98A;
+    --dirt: #174A87;
+    --chalk: #F4F3EA;
+    --dark: #070A0E;
+    --dark2: #0C1624;
+    --dark3: #10243D;
+    --mid: #24598B;
+    --muted: #7396B8;
+    --text: #F4F3EA;
+    --text-dim: #A8C2DA;
+    --red: #C93F38;
+    --blue: #174A87;
+    --radius: 2px;
+    --shadow: 6px 6px 0 rgba(0,0,0,0.55);
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -54,7 +54,7 @@
   }
 
   .app-logo {
-    font-family: 'Bebas Neue', cursive;
+    font-family: 'Press Start 2P', monospace;
     font-size: 28px;
     color: var(--gold);
     letter-spacing: 2px;
@@ -160,7 +160,7 @@
   }
 
   .card-title {
-    font-family: 'Bebas Neue', cursive;
+    font-family: 'Press Start 2P', monospace;
     font-size: 20px;
     color: var(--gold);
     letter-spacing: 1px;
@@ -284,7 +284,7 @@
   }
 
   .race-title {
-    font-family: 'Bebas Neue', cursive;
+    font-family: 'Press Start 2P', monospace;
     font-size: 18px;
     color: var(--gold);
     letter-spacing: 1px;
@@ -394,7 +394,7 @@
   }
 
   .track-title {
-    font-family: 'Bebas Neue', cursive;
+    font-family: 'Press Start 2P', monospace;
     font-size: 22px;
     color: var(--gold);
     letter-spacing: 2px;
@@ -620,7 +620,7 @@
   }
 
   .modal-title {
-    font-family: 'Bebas Neue', cursive;
+    font-family: 'Press Start 2P', monospace;
     font-size: 26px;
     color: var(--gold);
     letter-spacing: 2px;
@@ -636,7 +636,7 @@
   }
 
   .landing-hero h1 {
-    font-family: 'Bebas Neue', cursive;
+    font-family: 'Press Start 2P', monospace;
     font-size: clamp(48px, 12vw, 80px);
     color: var(--gold);
     letter-spacing: 4px;
@@ -772,6 +772,74 @@
   .history-event-header:hover { background: rgba(255,255,255,0.03); }
   .history-body { display: none; padding: 12px 16px; border-top: 1px solid var(--mid); }
   .history-body.open { display: block; }
+
+  /* ===== FPSO ARCADE THEME OVERRIDES ===== */
+  body {
+    background-color: var(--dark);
+    background-image:
+      linear-gradient(rgba(23,74,135,.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(23,74,135,.08) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+  .app-header {
+    background: #080b10;
+    border-bottom: 4px solid var(--red);
+    box-shadow: 0 4px 0 var(--blue);
+  }
+  .app-logo, .modal-title, .card-title, .race-title, .track-title, .landing-hero h1 {
+    font-family: 'Press Start 2P', monospace;
+    text-transform: uppercase;
+    line-height: 1.45;
+  }
+  .app-logo { font-size: 15px; color: var(--chalk); text-shadow: 2px 2px 0 var(--blue); }
+  .app-logo span { color: var(--red); }
+  .event-banner {
+    background: linear-gradient(90deg, #102e59, #0c1624);
+    border-bottom: 2px solid var(--blue);
+  }
+  .event-name { color: var(--chalk); }
+  .nav-tabs { background:#080b10; border-bottom:2px solid var(--blue); }
+  .nav-tab { font-family:'JetBrains Mono',monospace; font-weight:700; text-transform:uppercase; }
+  .nav-tab.active { color:var(--chalk); border-bottom-color:var(--red); background:rgba(201,63,56,.16); }
+  .card, .modal, .race-card, .track-container, .history-event {
+    border:2px solid var(--blue);
+    box-shadow:4px 4px 0 #020305;
+    border-radius:2px;
+  }
+  .card-title, .modal-title, .race-title, .track-title { color:var(--chalk); text-shadow:2px 2px 0 var(--blue); }
+  .btn { border-radius:2px; font-family:'JetBrains Mono',monospace; text-transform:uppercase; box-shadow:3px 3px 0 #020305; }
+  .btn:active { transform:translate(2px,2px); box-shadow:1px 1px 0 #020305; }
+  .btn-primary, .btn-gold { background:var(--red); color:#fff; border:2px solid #ef6a61; }
+  .btn-primary:hover, .btn-gold:hover { background:var(--gold-light); }
+  .btn-outline, .btn-admin { border:2px solid var(--blue); color:var(--chalk); border-radius:2px; }
+  .btn-outline:hover, .btn-admin:hover { border-color:var(--red); background:var(--red); color:#fff; }
+  input[type="text"], input[type="password"], input[type="datetime-local"], input[type="number"], select, textarea {
+    border-radius:2px; border:2px solid var(--blue); background:#08111d;
+  }
+  input:focus, select:focus, textarea:focus { border-color:var(--red); }
+  .race-header { background:linear-gradient(90deg,#102e59,#0c1624); border-bottom:2px solid var(--red); }
+  .runner-row { border-radius:2px; border:1px solid #183c60; }
+  .runner-row.selected { border:2px solid var(--red); background:rgba(201,63,56,.14); }
+  .runner-number { color:var(--chalk); background:var(--blue); border-radius:0; }
+  .runner-odds, .payout-val, .lane-score { color:var(--green-light); }
+  .selection-tick { background:var(--red); border-radius:2px; color:#fff; }
+  .lane-track { background:#0c2340; border:2px solid var(--blue); border-radius:2px; }
+  .admin-tab { border-radius:2px; font-family:'JetBrains Mono',monospace; text-transform:uppercase; }
+  .admin-tab.active { background:var(--red); color:#fff; border-color:#ef6a61; }
+  .pill { border-radius:2px; font-family:'JetBrains Mono',monospace; }
+  .pill-green { background:rgba(23,74,135,.35); color:#74d7eb; border-color:#55c6df; }
+  .pill-gold { background:rgba(201,63,56,.25); color:#ff8178; border-color:var(--red); }
+  .alert-warn { background:rgba(201,63,56,.14); border-color:var(--red); color:#ff8178; }
+  .alert-success { background:rgba(23,74,135,.25); border-color:#55c6df; color:#74d7eb; }
+  .landing-hero h1 { color:var(--chalk); text-shadow:4px 4px 0 var(--blue); font-size:clamp(34px,9vw,58px); }
+  .landing-hero h1 span { color:var(--red); }
+  .winner-glow { box-shadow:0 0 0 2px var(--red), 6px 6px 0 #020305; border-color:var(--red)!important; }
+  .chat-bubble.mine { background:#102e59; border:1px solid #55c6df; }
+  .paid-check.checked { background:var(--red); border-color:var(--red); }
+  @media (max-width:600px) {
+    .app-logo { font-size:12px; }
+    .nav-tab { padding:11px 13px; font-size:11px; }
+  }
 </style>
 </head>
 <body>
@@ -782,7 +850,7 @@
 <div class="modal-overlay" id="modal-landing">
   <div class="modal fade-in" style="max-width:560px;">
     <div style="text-align:center; margin-bottom:24px;">
-      <div style="font-family:'Bebas Neue',cursive; font-size:52px; color:var(--gold); letter-spacing:4px; line-height:0.9;">RACE<span style="color:white;">DAY</span></div>
+      <div style="font-family:'Press Start 2P',monospace; font-size:52px; color:var(--gold); letter-spacing:4px; line-height:0.9;">RACE<span style="color:white;">DAY</span></div>
       <div style="font-size:13px; color:var(--text-dim); margin-top:6px;">Workplace Horse Racing Comp 🏇</div>
     </div>
 
@@ -1128,7 +1196,7 @@ loadScript('https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js', () 
 // ============================================================
 const SUPABASE_URL = 'https://lrclsuzhhmndwkuswsnr.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxyY2xzdXpoaG1uZHdrdXN3c25yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIxMjUzOTQsImV4cCI6MjA5NzcwMTM5NH0.US_ny_3Ec6P8KOzBYA56-n6Q0vX-bziVznURhPcfeZQ';
-const ADMIN_PASSWORD = 'raceday2025'; // Change this
+const ADMIN_PASSWORD = 'FPSO123'; // Change this
 const ODDSPRO_API_KEY = 'YOUR_ODDSPRO_API_KEY'; // from oddspro.com.au
 const APP_URL = 'https://fpsosaturdayraces.netlify.app';
 
@@ -1370,7 +1438,7 @@ function renderEventPreview() {
 
   box.innerHTML = `
     <div style="background:var(--dark3); border-radius:8px; padding:16px; margin-bottom:12px;">
-      <div style="font-family:'Bebas Neue',cursive; font-size:22px; color:var(--gold); letter-spacing:1px;">${state.currentEvent.name}</div>
+      <div style="font-family:'Press Start 2P',monospace; font-size:22px; color:var(--gold); letter-spacing:1px;">${state.currentEvent.name}</div>
       <div style="font-size:12px; color:var(--text-dim); margin-top:4px;">
         Selections close: ${isLocked ? '<span style="color:var(--red);">LOCKED</span>' : lockout.toLocaleString('en-AU', { timeZone: 'Australia/Perth' }) + ' AWST'}
       </div>
@@ -2167,7 +2235,7 @@ function renderSettleList() {
 
   container.innerHTML = unsettled.map(race => `
     <div class="card" style="margin-bottom:12px;">
-      <div style="font-family:'Bebas Neue',cursive; font-size:18px; color:var(--gold); margin-bottom:12px;">
+      <div style="font-family:'Press Start 2P',monospace; font-size:18px; color:var(--gold); margin-bottom:12px;">
         Race ${race.race_number} — ${race.track}
       </div>
 
