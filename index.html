@@ -1157,12 +1157,12 @@
       <div class="admin-section" id="admin-races">
         <div class="card">
           <div class="card-title">Add Race</div>
-          <div class="alert alert-info">Races must be added before registration lockout. Publish by Thursday.</div>
+          <div class="alert alert-info">Races must be added before registration lockout.</div>
           <div class="form-group">
-            <label>Saturday Race Card</label>
+            <label>Race Card Date</label>
             <div style="display:grid; grid-template-columns:1fr auto; gap:8px;">
               <input type="date" id="race-date-input">
-              <button class="btn btn-primary btn-sm" onclick="loadSaturdayCard()">Load AU Card</button>
+              <button class="btn btn-primary btn-sm" onclick="loadRaceCard()">Load AU Card</button>
             </div>
             <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds via odds-api.net · Sportsbet prices · all times shown in Perth (AWST).</div>
           </div>
@@ -2349,7 +2349,6 @@ async function createRaceDayEvent() {
   if (!name || !lockout) { setCreateEventStatus('Enter an event name and lockout date/time.', 'warn'); return; }
   const lockoutDate = new Date(lockout + '+08:00');
   if (Number.isNaN(lockoutDate.getTime())) { setCreateEventStatus('Enter a valid lockout date/time in Perth (AWST).', 'warn'); return; }
-  if (!isSaturdayDateValue(lockout.slice(0,10))) { setCreateEventStatus('Competition lockout must be on a Saturday (AWST).', 'warn'); return; }
   if (!db) { setCreateEventStatus('Database connection unavailable. Reload the page and try again. No event was saved.', 'danger'); return; }
   if (state.currentEvent?.status === 'open') { setCreateEventStatus('Close the current event before creating another.', 'warn'); return; }
 
@@ -2463,16 +2462,6 @@ function formatPerthDateTime(iso) {
   }).format(new Date(iso)) + ' AWST';
 }
 
-function isSaturdayDateValue(dateStr) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return false;
-  return new Date(dateStr + 'T12:00:00+08:00').getUTCDay() === 6;
-}
-
-function perthSaturdayLockoutISO(dateStr) {
-  // Australia/Perth is UTC+08 year-round.
-  return dateStr ? dateStr + 'T09:00:00+08:00' : null;
-}
-
 function syncEventLockoutToRaceDate() {
   const date = document.getElementById('race-date-input')?.value;
   const input = document.getElementById('new-event-lockout');
@@ -2495,18 +2484,18 @@ function nextSaturdayISO() {
     String(perthCalendarDay.getUTCDate()).padStart(2,'0');
 }
 
-async function searchRaces() { return loadSaturdayCard(); }
+async function searchRaces() { return loadRaceCard(); }
 
-async function loadSaturdayCard() {
+async function loadRaceCard() {
   const input = document.getElementById('race-date-input');
   if (!input.value) input.value = nextSaturdayISO();
   const date = input.value;
   const container = document.getElementById('race-search-results');
-  if (!isSaturdayDateValue(date)) {
-    container.innerHTML = '<div class="alert alert-warn">Choose a Saturday race date. Selected: ' + (formatPerthDate(date) || 'invalid date') + '.</div>';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    container.innerHTML = '<div class="alert alert-warn">Choose a valid race date.</div>';
     return;
   }
-  container.innerHTML = '<div class="text-dim text-sm">Loading Australian Saturday race card…</div>';
+  container.innerHTML = '<div class="text-dim text-sm">Loading Australian race card for ' + escapeHtml(formatPerthDate(date)) + '…</div>';
   try {
     const res = await fetch('/.netlify/functions/odds-api-net?action=racing&race_type=horse-racing&race_country=AU');
     const payload = await res.json();
