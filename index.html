@@ -2329,7 +2329,55 @@ function renderAdminCurrentEvent() {
       <button class="btn btn-outline btn-sm" onclick="setLockoutOverride(null)">⏱ Automatic Lockout</button>
       <button class="btn btn-danger btn-sm" onclick="closeEvent()">Close & Archive Event</button>
     </div>
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--mid);">
+      <div class="text-sm" style="font-weight:700;margin-bottom:7px;">Change Scheduled Lock Time</div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;">
+        <div>
+          <label class="text-xs text-dim" for="admin-lockout-time">AWST / Perth</label>
+          <input type="datetime-local" id="admin-lockout-time" value="${perthDateTimeLocalValue(state.currentEvent.lockout_time)}">
+        </div>
+        <button class="btn btn-primary btn-sm" id="save-lockout-time-btn" onclick="saveScheduledLockout()">Save Lock Time</button>
+      </div>
+      <div id="admin-lockout-status" role="status" aria-live="polite" class="text-xs text-dim" style="margin-top:7px;"></div>
+    </div>
   `;
+}
+
+function perthDateTimeLocalValue(iso) {
+  if (!iso || Number.isNaN(new Date(iso).getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone:'Australia/Perth', year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hourCycle:'h23'
+  }).formatToParts(new Date(iso));
+  const get = type => parts.find(p => p.type === type)?.value || '';
+  return get('year') + '-' + get('month') + '-' + get('day') + 'T' + get('hour') + ':' + get('minute');
+}
+
+async function saveScheduledLockout() {
+  if (!state.isAdmin || !state.currentEvent || !db) return;
+  const input = document.getElementById('admin-lockout-time');
+  const status = document.getElementById('admin-lockout-status');
+  const button = document.getElementById('save-lockout-time-btn');
+  const value = input?.value;
+  if (!value) { if (status) status.textContent = 'Choose a date and time.'; return; }
+  const lockoutDate = new Date(value + '+08:00');
+  if (Number.isNaN(lockoutDate.getTime())) { if (status) status.textContent = 'Enter a valid AWST date/time.'; return; }
+  button.disabled = true;
+  button.textContent = 'Saving…';
+  try {
+    const { data, error } = await db.from('events')
+      .update({ lockout_time: lockoutDate.toISOString(), lockout_override: null })
+      .eq('id', state.currentEvent.id).select().single();
+    if (error) throw error;
+    state.currentEvent = data;
+    state.lockoutOverride = null;
+    updateBanner(); renderRaces(); renderAdminCurrentEvent();
+    showToast('Scheduled lock time changed to ' + formatPerthDateTime(data.lockout_time), 'success');
+  } catch (error) {
+    if (status) status.textContent = 'Could not change lock time: ' + error.message;
+    button.disabled = false;
+    button.textContent = 'Save Lock Time';
+  }
 }
 
 let creatingEvent = false;
