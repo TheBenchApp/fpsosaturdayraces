@@ -1119,7 +1119,9 @@
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin:12px 0;">
             <button class="btn btn-gold btn-sm" id="auto-card-btn" onclick="autoGenerateCard()" style="display:none;">⚡ Auto Generate 10</button>
-            <button class="btn btn-outline btn-sm" id="clear-auto-btn" onclick="clearGeneratedCard()" style="display:none;">Clear Generated</button>
+            <button class="btn btn-primary btn-sm" id="accept-auto-btn" onclick="acceptGeneratedCard()" style="display:none;">✓ Accept Card</button>
+            <button class="btn btn-outline btn-sm" id="regen-auto-btn" onclick="autoGenerateCard()" style="display:none;">↻ Generate Another</button>
+            <button class="btn btn-outline btn-sm" id="clear-auto-btn" onclick="clearGeneratedCard()" style="display:none;">Edit Manually</button>
           </div>
           <div id="race-search-results"></div>
         </div>
@@ -1134,7 +1136,7 @@
       <div class="admin-section" id="admin-settle">
         <div class="card">
           <div class="card-title">Settle Race Results</div>
-          <div class="alert alert-info">Enter barrier numbers for top 3 finishers + Sportsbet dividends. App calculates payouts automatically.</div>
+          <div class="alert alert-info">Enter runner/horse numbers for the top 3 finishers + Sportsbet dividends. App calculates payouts automatically.</div>
           <div id="settle-race-list"></div>
         </div>
       </div>
@@ -2263,13 +2265,25 @@ function autoGenerateCard() {
   loadedRacingCard.forEach(r=>r.autoSelected=used.has(r.id));
   renderLoadedRaces(loadedRacingCard);
   document.getElementById('clear-auto-btn').style.display='inline-flex';
-  showToast('10-race draft generated — review before adding', 'success');
+  document.getElementById('accept-auto-btn').style.display='inline-flex';
+  document.getElementById('regen-auto-btn').style.display='inline-flex';
+  showToast('10-race draft generated — review before accepting', 'success');
 }
 
 function clearGeneratedCard() {
   loadedRacingCard.forEach(r=>r.autoSelected=false);
-  document.getElementById('clear-auto-btn').style.display='none';
+  ['clear-auto-btn','accept-auto-btn','regen-auto-btn'].forEach(id=>document.getElementById(id).style.display='none');
   renderLoadedRaces(loadedRacingCard);
+}
+
+async function acceptGeneratedCard() {
+  const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>(new Date(a.time||0))-(new Date(b.time||0)));
+  if (picks.length !== 10) { showToast('Generate a 10-race draft first', 'warn'); return; }
+  if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
+  state.races = [];
+  for (const r of picks) await addLoadedRace(String(r.id));
+  clearGeneratedCard();
+  showToast('10-race card accepted', 'success');
 }
 
 async function addLoadedRace(apiId) {
@@ -2295,7 +2309,7 @@ async function addLoadedRace(apiId) {
   }));
 
   const newRace = {
-    id: 'race_' + Date.now(),
+    id: 'race_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
     api_id: r.id,
     event_id: state.currentEvent.id,
     name: r.name,
