@@ -1268,7 +1268,7 @@ async function initApp() {
   await loadCurrentEvent();
   checkLocalUser();
   document.getElementById('app-url-input').value = APP_URL;
-  const raceDateInput = document.getElementById('race-date-input'); if (raceDateInput && !raceDateInput.value) raceDateInput.value = nextSaturdayISO();
+  const raceDateInput = document.getElementById('race-date-input'); if (raceDateInput && !raceDateInput.value) raceDateInput.value = nextSaturdayISO(); syncEventLockoutToRaceDate();
 }
 
 function checkLocalUser() {
@@ -1553,8 +1553,7 @@ async function submitRegistration() {
     return;
   }
 
-  const lockout = new Date(state.currentEvent.lockout_time);
-  if (lockout < new Date()) {
+  if (isSelectionsLocked()) {
     errEl.textContent = 'Registration is closed for this event.';
     errEl.style.display = 'block';
     return;
@@ -2097,7 +2096,7 @@ function renderAdminCurrentEvent() {
     <div class="flex-between" style="margin-bottom:12px;">
       <div>
         <div style="font-size:18px; font-weight:700;">${state.currentEvent.name}</div>
-        <div class="text-sm text-dim">Lockout: ${lockout.toLocaleString('en-AU')} ${isLocked ? '<span style="color:var(--red);">— LOCKED</span>' : ''}</div>
+        <div class="text-sm text-dim">Lockout: ${lockout.toLocaleString('en-AU',{timeZone:'Australia/Perth'})} AWST ${isLocked ? '<span style="color:var(--red);">— LOCKED</span>' : ''}</div>
       </div>
       <span class="pill ${state.currentEvent.status === 'open' ? 'pill-green' : 'pill-grey'}">${state.currentEvent.status}</span>
     </div>
@@ -2174,6 +2173,18 @@ function perthTime(iso) {
   return new Intl.DateTimeFormat('en-AU', {
     timeZone:'Australia/Perth', hour:'numeric', minute:'2-digit', hour12:true
   }).format(new Date(iso)) + ' AWST';
+}
+
+function perthSaturdayLockoutISO(dateStr) {
+  // Australia/Perth is UTC+08 year-round.
+  return dateStr ? dateStr + 'T09:00:00+08:00' : null;
+}
+
+function syncEventLockoutToRaceDate() {
+  const date = document.getElementById('race-date-input')?.value;
+  const input = document.getElementById('new-event-lockout');
+  if (!date || !input || input.value) return;
+  input.value = date + 'T09:00';
 }
 
 function nextSaturdayISO() {
