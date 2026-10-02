@@ -2462,16 +2462,6 @@ function formatPerthDateTime(iso) {
   }).format(new Date(iso)) + ' AWST';
 }
 
-function isSaturdayDateValue(dateStr) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return false;
-  return new Date(dateStr + 'T12:00:00+08:00').getUTCDay() === 6;
-}
-
-function perthSaturdayLockoutISO(dateStr) {
-  // Australia/Perth is UTC+08 year-round.
-  return dateStr ? dateStr + 'T09:00:00+08:00' : null;
-}
-
 function syncEventLockoutToRaceDate() {
   const date = document.getElementById('race-date-input')?.value;
   const input = document.getElementById('new-event-lockout');
