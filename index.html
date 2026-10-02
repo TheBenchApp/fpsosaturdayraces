@@ -851,7 +851,7 @@
 <div class="modal-overlay" id="modal-landing">
   <div class="modal fade-in" style="max-width:560px;">
     <div style="text-align:center; margin-bottom:24px;">
-      <div style="font-family:'Press Start 2P',monospace; font-size:52px; color:var(--gold); letter-spacing:4px; line-height:0.9;">RACE<span style="color:white;">DAY</span></div>
+      <img class="fpso-logo-main" src="IMG_7391.jpeg" alt="FPSO Race Day">
       <div style="font-size:13px; color:var(--text-dim); margin-top:6px;">Workplace Horse Racing Comp 🏇</div>
     </div>
 
@@ -862,7 +862,7 @@
 
     <div id="landing-btns" style="margin-top:20px; display:flex; flex-direction:column; gap:10px;">
       <button class="btn btn-gold btn-full" onclick="showTCs()" id="btn-enter">Enter the Comp →</button>
-      <div style="font-size:11px; color:var(--text-dim); text-align:center;">By continuing you agree to the Rules & T&Cs</div>
+      <div style="font-size:11px; color:var(--text-dim); text-align:center;">By continuing you agree to the <button type="button" onclick="showTCs(true)" style="background:none;border:0;padding:0;color:var(--green-light);text-decoration:underline;cursor:pointer;font:inherit;">Rules & T&Cs</button></div>
     </div>
 
     <div style="text-align:center; margin-top:16px;">
@@ -982,7 +982,7 @@
 
   <!-- Header -->
   <div class="app-header">
-    <div class="app-logo">RACE<span>DAY</span></div>
+    <img class="fpso-logo-header" src="IMG_7391.jpeg" alt="FPSO Race Day">
     <div class="header-right">
       <div class="user-badge" id="user-badge">
         <span class="horse-dot" id="user-badge-dot"></span>
@@ -1111,7 +1111,7 @@
               <input type="date" id="race-date-input">
               <button class="btn btn-primary btn-sm" onclick="loadSaturdayCard()">Load AU Card</button>
             </div>
-            <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds · times shown in Perth (AWST). Free PuntersEdge acceptances are available up to 3 days ahead.</div>
+            <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds via odds-api.net · Sportsbet prices · all times shown in Perth (AWST).</div>
           </div>
           <div class="form-group">
             <label>Filter loaded card</label>
@@ -1236,6 +1236,7 @@ let state = {
   participants: [],    // all valid participants
   chatSub: null,
   resultsSub: null,
+  lockoutOverride: null, // null=automatic, 'open'=admin unlock, 'locked'=admin relock
 };
 
 // Horse colours for picker
@@ -1267,7 +1268,7 @@ async function initApp() {
   await loadCurrentEvent();
   checkLocalUser();
   document.getElementById('app-url-input').value = APP_URL;
-  const raceDateInput = document.getElementById('race-date-input'); if (raceDateInput && !raceDateInput.value) raceDateInput.value = nextSaturdayISO();
+  const raceDateInput = document.getElementById('race-date-input'); if (raceDateInput && !raceDateInput.value) raceDateInput.value = nextSaturdayISO(); syncEventLockoutToRaceDate();
 }
 
 function checkLocalUser() {
@@ -1308,12 +1309,34 @@ async function loadCurrentEvent() {
 
     if (events && events.length > 0) {
       state.currentEvent = events[0];
+      state.lockoutOverride = localStorage.getItem('raceday_lockout_override_' + state.currentEvent.id) || null;
       const { data: races } = await db
         .from('races')
         .select('*, runners(*)')
         .eq('event_id', state.currentEvent.id)
         .order('race_time', { ascending: true });
       state.races = races || [];
+
+      // Load the live field and each participant's selections for leaderboard/tracker.
+      const { data: participants, error: participantError } = await db
+        .from('participants')
+        .select('*')
+        .eq('event_id', state.currentEvent.id);
+      if (participantError) console.error('Participant load error:', participantError);
+      const { data: selections, error: selectionError } = await db
+        .from('selections')
+        .select('*')
+        .eq('event_id', state.currentEvent.id);
+      if (selectionError) console.error('Selection load error:', selectionError);
+
+      const byParticipant = {};
+      (selections || []).forEach(sel => {
+        (byParticipant[sel.participant_id] ||= {})[sel.race_id] = sel.runner_number;
+      });
+      state.participants = (participants || []).map(p => ({
+        ...p,
+        selections: byParticipant[p.id] || {}
+      }));
     }
   } catch(e) {
     console.error('DB error:', e);
@@ -1445,7 +1468,7 @@ function renderEventPreview() {
   }
 
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
   const races = state.races;
 
   box.innerHTML = `
@@ -1485,9 +1508,15 @@ function guessTimezone(track) {
   return 'Australia/Sydney';
 }
 
-function showTCs() {
+let tcsViewOnly = false;
+function showTCs(viewOnly = false) {
+  tcsViewOnly = viewOnly;
   document.getElementById("modal-landing").classList.add("hidden");
   document.getElementById("modal-tcs").classList.remove("hidden");
+  const agree = document.getElementById("tcs-agree");
+  const proceed = document.querySelector('#modal-tcs button[onclick="proceedToRegister()"]');
+  if (agree) agree.closest("label").style.display = viewOnly ? "none" : "";
+  if (proceed) proceed.style.display = viewOnly ? "none" : "";
 }
 
 function hideTCs() {
@@ -1530,8 +1559,7 @@ async function submitRegistration() {
     return;
   }
 
-  const lockout = new Date(state.currentEvent.lockout_time);
-  if (lockout < new Date()) {
+  if (isSelectionsLocked()) {
     errEl.textContent = 'Registration is closed for this event.';
     errEl.style.display = 'block';
     return;
@@ -1592,11 +1620,26 @@ function showMainApp() {
   }
 }
 
+function isSelectionsLocked() {
+  if (!state.currentEvent) return true;
+  if (state.lockoutOverride === 'open') return false;
+  if (state.lockoutOverride === 'locked') return true;
+  return new Date(state.currentEvent.lockout_time) <= new Date();
+}
+
+async function setLockoutOverride(mode) {
+  if (!state.isAdmin) return;
+  state.lockoutOverride = mode;
+  localStorage.setItem('raceday_lockout_override_' + state.currentEvent.id, mode || '');
+  updateBanner(); renderRaces(); renderAdminCurrentEvent();
+  showToast(mode === 'open' ? 'Selections manually unlocked' : mode === 'locked' ? 'Selections manually locked' : 'Automatic lockout restored', 'success');
+}
+
 function updateBanner() {
   if (!state.currentEvent) return;
   document.getElementById('banner-event-name').textContent = state.currentEvent.name;
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
   const statusEl = document.getElementById('banner-event-status');
   if (isLocked) {
     statusEl.textContent = '🔒 Selections Locked';
@@ -1667,7 +1710,7 @@ function renderRaces() {
   if (!state.currentEvent) { container.innerHTML = ''; return; }
 
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
 
   lockedMsg.style.display = isLocked ? 'block' : 'none';
   tbcMsg.style.display = state.races.length === 0 ? 'block' : 'none';
@@ -1682,7 +1725,7 @@ function renderRaces() {
         <div class="race-header">
           <div>
             <div class="race-title">Race ${race.race_number} — ${race.track}</div>
-            <div class="race-meta">${new Date(race.race_time).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: guessTimezone(race.track) })} local · ${race.runners?.length || 0} runners</div>
+            <div class="race-meta">${new Date(race.race_time).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: 'Australia/Perth' })} AWST · ${race.runners?.length || 0} runners</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
             ${settled ? `<span class="pill pill-gold">Settled</span>` : `<span class="pill pill-green">Open</span>`}
@@ -1708,10 +1751,13 @@ function renderRaces() {
                      onclick="${canSelect ? `selectRunner('${race.id}', ${runner.number})` : ''}">
                   <div class="runner-number">${runner.number}</div>
                   <div class="runner-name">
-                    ${runner.name}
-                    ${isScratched ? '<span style="font-size:10px; color:var(--red); margin-left:6px;">SCRATCHED</span>' : ''}
+                    <div>${runner.name}${isScratched ? '<span style="font-size:10px; color:var(--red); margin-left:6px;">SCRATCHED</span>' : ''}</div>
+                    ${runner.jockey || runner.trainer ? `<div style="font-size:10px;color:var(--text-dim);margin-top:3px;">${runner.jockey ? 'J: '+runner.jockey : ''}${runner.jockey && runner.trainer ? ' · ' : ''}${runner.trainer ? 'T: '+runner.trainer : ''}</div>` : ''}
                   </div>
-                  <div class="runner-odds">$${runner.odds?.toFixed(1) || '—'}</div>
+                  <div class="runner-odds" style="min-width:78px;text-align:right;">
+                    <div>W ${runner.odds != null ? Number(runner.odds).toFixed(2) : '—'}</div>
+                    <div style="font-size:10px;color:var(--text-dim);margin-top:2px;">P ${runner.place_odds != null ? Number(runner.place_odds).toFixed(2) : '—'}</div>
+                  </div>
                   <div class="selection-tick">✓</div>
                 </div>
               `;
@@ -1737,6 +1783,7 @@ function selectRunner(raceId, number) {
 
 async function saveSelections() {
   if (!state.user || !state.currentEvent) return;
+  if (isSelectionsLocked()) { showToast('Selections are locked', 'warn'); renderRaces(); return; }
 
   localStorage.setItem('raceday_selections_' + state.currentEvent.id, JSON.stringify(state.selections));
 
@@ -2034,9 +2081,11 @@ function adminLogin() {
     hideAdminLogin();
     document.getElementById('btn-admin-tab').style.display = 'block';
 
-    if (document.getElementById('main-app').style.display === 'none') {
-      showMainApp();
-    }
+    document.getElementById('modal-landing').classList.add('hidden');
+    document.getElementById('modal-tcs').classList.add('hidden');
+    document.getElementById('modal-register').classList.add('hidden');
+    document.getElementById('main-app').style.display = 'block';
+    updateBanner();
     goAdmin();
     showToast('Admin access granted', 'success');
   } else {
@@ -2052,17 +2101,20 @@ function renderAdminCurrentEvent() {
   }
 
   const lockout = new Date(state.currentEvent.lockout_time);
-  const isLocked = lockout < new Date();
+  const isLocked = isSelectionsLocked();
 
   container.innerHTML = `
     <div class="flex-between" style="margin-bottom:12px;">
       <div>
         <div style="font-size:18px; font-weight:700;">${state.currentEvent.name}</div>
-        <div class="text-sm text-dim">Lockout: ${lockout.toLocaleString('en-AU')} ${isLocked ? '<span style="color:var(--red);">— LOCKED</span>' : ''}</div>
+        <div class="text-sm text-dim">Lockout: ${lockout.toLocaleString('en-AU',{timeZone:'Australia/Perth'})} AWST ${isLocked ? '<span style="color:var(--red);">— LOCKED</span>' : ''}</div>
       </div>
       <span class="pill ${state.currentEvent.status === 'open' ? 'pill-green' : 'pill-grey'}">${state.currentEvent.status}</span>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-outline btn-sm" onclick="setLockoutOverride('open')">🔓 Unlock Selections</button>
+      <button class="btn btn-outline btn-sm" onclick="setLockoutOverride('locked')">🔒 Lock Selections</button>
+      <button class="btn btn-outline btn-sm" onclick="setLockoutOverride(null)">⏱ Automatic Lockout</button>
       <button class="btn btn-danger btn-sm" onclick="closeEvent()">Close & Archive Event</button>
     </div>
   `;
@@ -2134,6 +2186,18 @@ function perthTime(iso) {
   }).format(new Date(iso)) + ' AWST';
 }
 
+function perthSaturdayLockoutISO(dateStr) {
+  // Australia/Perth is UTC+08 year-round.
+  return dateStr ? dateStr + 'T09:00:00+08:00' : null;
+}
+
+function syncEventLockoutToRaceDate() {
+  const date = document.getElementById('race-date-input')?.value;
+  const input = document.getElementById('new-event-lockout');
+  if (!date || !input || input.value) return;
+  input.value = date + 'T09:00';
+}
+
 function nextSaturdayISO() {
   const now = new Date();
   const perth = new Date(now.toLocaleString('en-US', { timeZone:'Australia/Perth' }));
@@ -2149,45 +2213,60 @@ async function loadSaturdayCard() {
   if (!input.value) input.value = nextSaturdayISO();
   const date = input.value;
   const container = document.getElementById('race-search-results');
-  container.innerHTML = '<div class="text-dim text-sm">Loading Australian thoroughbred acceptances…</div>';
-
+  container.innerHTML = '<div class="text-dim text-sm">Loading Australian Saturday race card…</div>';
   try {
-    const res = await fetch('/.netlify/functions/racing-api?action=acceptances&date=' + encodeURIComponent(date));
+    const res = await fetch('/.netlify/functions/odds-api-net?action=racing&race_type=horse-racing&race_country=AU');
     const payload = await res.json();
-    if (!res.ok || !payload.ok) throw new Error(payload.error || 'Racing API request failed');
-
-    const raw = payload.data || {};
-    const meetings = raw.meetings || raw.data || [];
-    loadedRacingCard = [];
-
-    for (const meeting of meetings) {
-      const track = meeting.venue || meeting.track || meeting.name || 'Unknown track';
-      const races = meeting.races || meeting.events || [];
-      for (const race of races) {
-        const runners = race.runners || race.acceptances || [];
-        loadedRacingCard.push({
-          id: race.race_id || race.id || [date, meeting.venue_id || track, race.race_number || race.number].join('::'),
-          track,
-          race_number: race.race_number || race.number,
-          name: race.race_name || race.name || ('Race ' + (race.race_number || race.number || '')),
-          time: race.start_time || race.startTime || race.advertised_start || acceptanceTimeISO(date, race.start_time_local) || null,
-          local_time: race.start_time_local || null,
-          distance: race.distance_m || race.distance_metres || race.distance || null,
-          class: race.group || race.grade || race.class || race.race_class || race.conditions || '',
-          conditions: race.conditions || race.conditions_line || '',
-          prize: race.prize_total || race.prizemoney || null,
-          runners
-        });
-      }
-    }
-
+    if (!res.ok) throw new Error(payload.error || 'Odds API request failed');
+    const items = payload.items || payload.data?.items || payload.data || [];
+    loadedRacingCard = items.filter(r => {
+      if (!r.race_start_time) return false;
+      const d = new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Perth',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Number(r.race_start_time)*1000));
+      return d === date && r.race_country === 'AU' && r.race_type === 'horse-racing';
+    }).map(r => {
+      const feature = featureRaceMeta(date, r.race_venue, r.race_number);
+      return {
+        id:r.event_id, track:titleCase(r.race_venue || 'Unknown track'), race_number:r.race_number,
+        name:feature?.name || ('Race ' + (r.race_number || '')),
+        time:new Date(Number(r.race_start_time)*1000).toISOString(), distance:r.race_distance || null,
+        class:feature?.grade || '', conditions:'', runners:[],
+        active_runners:r.active_runners ?? null, total_runners:r.total_runners ?? null,
+        scratched_runners:r.scratched_runners ?? null, runner_count_complete:Boolean(r.runner_count_complete),
+        provider:'odds-api.net'
+      };
+    }).sort((a,b)=>new Date(a.time)-new Date(b.time));
+    if (!loadedRacingCard.length) throw new Error('No Australian races returned for ' + date + '.');
     document.getElementById('auto-card-btn').style.display = loadedRacingCard.length >= 10 ? 'inline-flex' : 'none';
     renderLoadedRaces(loadedRacingCard);
   } catch (e) {
     container.innerHTML = '<div class="alert alert-danger">' + escapeHtml(e.message) + '</div>';
   }
 }
-
+function titleCase(v) { return String(v || '').replace(/\b\w/g, c => c.toUpperCase()); }
+function featureRaceMeta(date, venue, raceNumber) {
+  if (date !== '2026-10-03') return null;
+  const key = String(venue || '').toLowerCase() + ':' + String(raceNumber);
+  const m = {
+    'flemington:1':{name:'Darley Maribyrnong Trial Stakes',grade:'Listed'},
+    'flemington:3':{name:'Howden Super Impose Stakes',grade:'Listed'},
+    'flemington:4':{name:'TAB One Pool Edward Manifold Stakes',grade:'G2'},
+    'flemington:5':{name:'Cirka Rose of Kingston Stakes',grade:'G2'},
+    'flemington:6':{name:'Asahi Super Dry Danehill Stakes',grade:'G2'},
+    'flemington:7':{name:'The Lexus Bart Cummings',grade:'G3'},
+    'flemington:8':{name:'TAB Turnbull Stakes',grade:'G1'},
+    'flemington:9':{name:'Gilgai Stakes',grade:'G2'},
+    'flemington:10':{name:'HKJC World Pool Paris Lane Stakes',grade:'Listed'},
+    'randwick:2':{name:"Arrowfield Breeders' Plate",grade:'G3'},
+    'randwick:3':{name:'Keeneland Gimcrack Stakes',grade:'G3'},
+    'randwick:4':{name:'Dulcify Stakes',grade:'Listed'},
+    'randwick:6':{name:'Darley Flight Stakes',grade:'G1'},
+    'randwick:7':{name:'The Metropolitan',grade:'G2'},
+    'randwick:8':{name:'TAB Epsom',grade:'G1'},
+    'randwick:9':{name:'Premiere Stakes',grade:'G2'},
+    'kalgoorlie:9':{name:'Kalgoorlie Cup',grade:'Listed'}
+  };
+  return m[key] || null;
+}
 function filterLoadedRaces() {
   const q = (document.getElementById('race-search-input').value || '').trim().toLowerCase();
   renderLoadedRaces(!q ? loadedRacingCard : loadedRacingCard.filter(r =>
@@ -2208,13 +2287,13 @@ function renderLoadedRaces(races) {
       <div style="font-family:'Press Start 2P',monospace; color:var(--green-light); font-size:12px; margin-bottom:8px;">${escapeHtml(track)}</div>
       ${trackRaces.map(r => {
         const priority = groupPriority(r);
-        const badge = priority ? '<span class="pill pill-gold">G' + (4-priority) + '</span>' : '';
+        const badge = priority ? '<span class="pill pill-gold">G' + (4-priority) + '</span>' : (String(r.class).toUpperCase()==='LISTED' ? '<span class="pill pill-grey">LISTED</span>' : '');
         const autoBadge = r.autoSelected ? '<span class="pill pill-green">AUTO PICK</span>' : '';
         return `
           <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; padding:10px; background:var(--dark3); border:1px solid var(--mid); margin-bottom:7px;">
             <div>
               <div style="font-weight:700;">R${escapeHtml(String(r.race_number || '?'))} · ${escapeHtml(r.name)} ${badge} ${autoBadge}</div>
-              <div class="text-xs text-dim">${perthTime(r.time)}${r.distance ? ' · '+escapeHtml(String(r.distance))+'m' : ''} · ${r.runners.length} runners</div>
+              <div class="text-xs text-dim">${perthTime(r.time)}${r.distance ? ' · '+escapeHtml(String(r.distance))+'m' : ''} · ${escapeHtml(String(r.active_runners ?? r.runners.length))} active runners${r.scratched_runners ? ' · '+escapeHtml(String(r.scratched_runners))+' scratched' : ''}</div>
             </div>
             <button class="btn ${r.autoSelected ? 'btn-gold' : 'btn-primary'} btn-sm" onclick="addLoadedRace('${escapeHtml(String(r.id || ''))}')">${r.autoSelected ? '✓ Add Pick' : '+ Add'}</button>
           </div>`;
@@ -2226,9 +2305,9 @@ function renderLoadedRaces(races) {
 
 function groupPriority(r) {
   const s = (String(r.class || '') + ' ' + String(r.conditions || '') + ' ' + String(r.name || '')).toUpperCase();
-  if (/\\b(GROUP\\s*1|G1)\\b/.test(s)) return 3;
-  if (/\\b(GROUP\\s*2|G2)\\b/.test(s)) return 2;
-  if (/\\b(GROUP\\s*3|G3)\\b/.test(s)) return 1;
+  if (/\b(GROUP\s*1|G1)\b/.test(s)) return 3;
+  if (/\b(GROUP\s*2|G2)\b/.test(s)) return 2;
+  if (/\b(GROUP\s*3|G3)\b/.test(s)) return 1;
   return 0;
 }
 
@@ -2291,10 +2370,32 @@ async function acceptGeneratedCard() {
   const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>(new Date(a.time||0))-(new Date(b.time||0)));
   if (picks.length !== 10) { showToast('Generate a 10-race draft first', 'warn'); return; }
   if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
-  state.races = [];
-  for (const r of picks) await addLoadedRace(String(r.id));
-  clearGeneratedCard();
-  showToast('10-race card accepted', 'success');
+  if (state.races.length) {
+    if (!confirm('Replace the current race card with this generated 10-race card?')) return;
+    if (db) {
+      for (const existing of [...state.races]) {
+        const { error: selectionError } = await db.from('selections').delete().eq('race_id', existing.id);
+        if (selectionError) { showToast('Could not replace card: ' + selectionError.message, 'danger'); return; }
+        const { error: runnerError } = await db.from('runners').delete().eq('race_id', existing.id);
+        if (runnerError) { showToast('Could not replace card: ' + runnerError.message, 'danger'); return; }
+        const { error: raceError } = await db.from('races').delete().eq('id', existing.id);
+        if (raceError) { showToast('Could not replace card: ' + raceError.message, 'danger'); return; }
+      }
+    }
+    state.races = [];
+  }
+  let added = 0;
+  for (const r of picks) {
+    const before = state.races.length;
+    await addLoadedRace(String(r.id));
+    if (state.races.length > before) added++;
+  }
+  if (added === 10) {
+    clearGeneratedCard();
+    showToast('10-race card accepted and saved', 'success');
+  } else {
+    showToast('Only ' + added + ' of 10 races saved. Review the card before publishing.', 'warn');
+  }
 }
 
 async function addLoadedRace(apiId) {
@@ -2304,13 +2405,28 @@ async function addLoadedRace(apiId) {
   if (state.races.length >= 10) { showToast('Competition card is limited to 10 races', 'warn'); return; }
   if (state.races.some(x => String(x.api_id) === String(r.id))) { showToast('That race is already on the card', 'warn'); return; }
 
+  if (!r.runners || !r.runners.length) {
+    try {
+      const oddsRes = await fetch('/.netlify/functions/odds-api-net?action=race_odds&event_id=' + encodeURIComponent(r.id));
+      const oddsPayload = await oddsRes.json();
+      if (!oddsRes.ok) throw new Error(oddsPayload.error || 'Sportsbet odds request failed');
+      const sportsbet = (oddsPayload.items || []).find(x => String(x.bookmaker_name || '').toLowerCase() === 'sportsbet');
+      if (!sportsbet || !Array.isArray(sportsbet.runners)) throw new Error('Sportsbet runner prices are not available for this race yet');
+      r.runners = sportsbet.runners;
+      r.odds_as_of = oddsPayload.as_of_ts_ms || null;
+    } catch (e) {
+      showToast(e.message, 'warn');
+      return;
+    }
+  }
+
   const runners = (r.runners || []).map(x => ({
     number: x.runner_number || x.number || x.saddlecloth || x.tab_number,
     name: x.horse_name || x.runner_name || x.name || 'Runner',
     jockey: x.jockey || x.jockey_name || '',
     trainer: x.trainer || x.trainer_name || '',
     barrier: x.barrier || null,
-    scratched: Boolean(x.scratched || x.is_scratched || x.status === 'scratched'),
+    scratched: Boolean(x.scratched || x.is_scratched || x.runner_status === 'SCRATCHED' || x.status === 'scratched'),
     odds: x.win_odds || x.win_price || x.odds || null,
     place_odds: x.place_odds || x.place_price || null,
     form: x.last10 || x.last_10 || x.form || '',
@@ -2329,16 +2445,75 @@ async function addLoadedRace(apiId) {
     race_time: r.time,
     distance: r.distance,
     race_class: r.class,
+    odds_as_of: r.odds_as_of || null,
+    odds_snapshot_favourite: (() => { const a=runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((x,y)=>Number(x.odds)-Number(y.odds)||Number(x.number)-Number(y.number)); return a[0] ? {number:a[0].number,name:a[0].name,win_odds:a[0].odds,captured_at:r.odds_as_of||Date.now()} : null; })(),
     status: 'open',
     runners,
     result_1st:null, result_2nd:null, result_3rd:null,
     win_div:null, place_div:null, favourite_number:null
   };
 
+  if (db) {
+    const { data: savedRace, error: raceError } = await db.from('races').insert({
+      event_id: state.currentEvent.id,
+      name: newRace.name,
+      track: newRace.track,
+      race_number: newRace.race_number,
+      race_time: newRace.race_time,
+      status: 'open'
+    }).select().single();
+    if (raceError) { showToast('Could not save race: ' + raceError.message, 'danger'); return; }
+
+    newRace.id = savedRace.id;
+    const runnerRows = runners.map(x => ({
+      race_id: savedRace.id,
+      number: Number(x.number),
+      name: x.name,
+      odds: x.odds == null ? null : Number(x.odds),
+      scratched: Boolean(x.scratched)
+    }));
+    if (runnerRows.length) {
+      const { error: runnerError } = await db.from('runners').insert(runnerRows);
+      if (runnerError) {
+        await db.from('races').delete().eq('id', savedRace.id);
+        showToast('Could not save runners: ' + runnerError.message, 'danger');
+        return;
+      }
+    }
+  }
+
   state.races.push(newRace);
   showToast('R' + r.race_number + ' ' + r.track + ' added', 'success');
   renderAdminRaceList();
   renderRaces();
+}
+
+async function refreshSportsbetRace(raceId) {
+  const race = state.races.find(x => String(x.id) === String(raceId));
+  if (!race?.api_id) { showToast('No provider race ID for this race', 'warn'); return; }
+  try {
+    const res = await fetch('/.netlify/functions/odds-api-net?action=race_odds&event_id=' + encodeURIComponent(race.api_id));
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || 'Sportsbet refresh failed');
+    const sportsbet = (payload.items || []).find(x => String(x.bookmaker_name || '').toLowerCase() === 'sportsbet');
+    if (!sportsbet?.runners?.length) throw new Error('Sportsbet prices are not available yet');
+    race.runners = sportsbet.runners.map(x => ({
+      number:x.runner_number, name:x.runner_name || 'Runner', jockey:x.jockey_name || '', trainer:x.trainer_name || '',
+      scratched:Boolean(x.is_scratched || x.runner_status === 'SCRATCHED'), odds:x.win_odds ?? null,
+      place_odds:x.place_odds ?? null, selection_id:x.selection_id || null
+    }));
+    race.odds_as_of = payload.as_of_ts_ms || Date.now();
+    const active = race.runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((a,b)=>Number(a.odds)-Number(b.odds)||Number(a.number)-Number(b.number));
+    race.odds_snapshot_favourite = active[0] ? {number:active[0].number,name:active[0].name,win_odds:active[0].odds,captured_at:race.odds_as_of} : null;
+    // Only call this the pre-race favourite when refreshed within 10 minutes of the advertised jump.
+    const jump = new Date(race.race_time).getTime();
+    if (active[0] && race.odds_as_of <= jump && (jump - race.odds_as_of) <= 10*60*1000) {
+      race.pre_race_favourite = {...race.odds_snapshot_favourite};
+      race.favourite_number = active[0].number;
+    }
+    renderAdminRaceList(); renderRaces();
+    showToast('Sportsbet field and prices refreshed', 'success');
+  } catch(e) { showToast(e.message, 'warn'); }
 }
 
 async function addRaceToEvent(apiId, name, track) {
@@ -2382,9 +2557,10 @@ function renderAdminRaceList() {
     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--dark3); border-radius:6px; margin-bottom:8px;">
       <div>
         <div style="font-weight:600;">Race ${r.race_number} — ${r.track}</div>
-        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status}</div>
+        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status}${r.odds_as_of ? ' · Sportsbet '+new Date(r.odds_as_of).toLocaleTimeString('en-AU',{timeZone:'Australia/Perth',hour:'numeric',minute:'2-digit'})+' AWST' : ''}</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-outline btn-sm" onclick="refreshSportsbetRace('${r.id}')">↻ Odds</button>
         <span class="pill ${r.status === 'settled' ? 'pill-gold' : 'pill-green'}">${r.status}</span>
         <button class="btn btn-danger btn-sm" onclick="removeRace('${r.id}')">✕</button>
       </div>
@@ -2392,9 +2568,18 @@ function renderAdminRaceList() {
   `).join('');
 }
 
-function removeRace(raceId) {
+async function removeRace(raceId) {
   if (!confirm('Remove this race?')) return;
-  state.races = state.races.filter(r => r.id !== raceId);
+  if (db) {
+    // Remove child rows first for schemas without ON DELETE CASCADE.
+    const { error: selectionError } = await db.from('selections').delete().eq('race_id', raceId);
+    if (selectionError) { showToast('Could not remove race selections: ' + selectionError.message, 'danger'); return; }
+    const { error: runnerError } = await db.from('runners').delete().eq('race_id', raceId);
+    if (runnerError) { showToast('Could not remove race runners: ' + runnerError.message, 'danger'); return; }
+    const { error: raceError } = await db.from('races').delete().eq('id', raceId);
+    if (raceError) { showToast('Could not remove race: ' + raceError.message, 'danger'); return; }
+  }
+  state.races = state.races.filter(r => String(r.id) !== String(raceId));
   renderAdminRaceList();
   renderRaces();
 }
@@ -2422,7 +2607,7 @@ function renderSettleList() {
       <div class="settle-grid" style="margin-bottom:10px;">
         <div class="form-group" style="margin:0;">
           <label>Favourite # (pre-race)</label>
-          <input type="number" id="fav-${race.id}" placeholder="e.g. 4" min="1" max="24">
+          <input type="number" id="fav-${race.id}" placeholder="auto from near-jump odds" min="1" max="24">
         </div>
         <div></div>
         <div class="form-group" style="margin:0;">
@@ -2457,7 +2642,8 @@ async function settleRace(raceId) {
   const race = state.races.find(r => r.id === raceId);
   if (!race) return;
 
-  const fav = parseInt(document.getElementById(`fav-${raceId}`).value);
+  const favInput = parseInt(document.getElementById(`fav-${raceId}`).value);
+  const fav = favInput || race.pre_race_favourite?.number || race.odds_snapshot_favourite?.number || null;
   const pos1 = parseInt(document.getElementById(`pos1-${raceId}`).value);
   const pos2 = parseInt(document.getElementById(`pos2-${raceId}`).value);
   const pos3 = parseInt(document.getElementById(`pos3-${raceId}`).value) || null;
