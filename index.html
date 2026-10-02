@@ -1702,12 +1702,11 @@ async function submitRegistration() {
   if(!selectedColour){errEl.textContent='Please pick a horse colour.';errEl.style.display='block';return;}
   if(!state.currentEvent||isSelectionsLocked()){errEl.textContent='Registration is closed for this event.';errEl.style.display='block';return;}
 
-  const {data:authData,error:authError}=await db.auth.signUp({email:playerAuthEmail(username),password});
-  if(authError){errEl.textContent=authError.message.toLowerCase().includes('registered')?'That username is already taken.':'Account creation failed: '+authError.message;errEl.style.display='block';return;}
-  if(!authData.session){errEl.textContent='Account created but automatic login is unavailable. Please contact admin.';errEl.style.display='block';return;}
+  const signup=await db.functions.invoke('player-signup',{body:{username,display_name:name,password,colour:selectedColour}});
+  if(signup.error||signup.data?.error){errEl.textContent=signup.data?.error||'Account creation failed. Please try again.';errEl.style.display='block';return;}
+  const {data:authData,error:authError}=await db.auth.signInWithPassword({email:playerAuthEmail(username),password});
+  if(authError||!authData.user){errEl.textContent='Account created, but login failed. Please use Player Login.';errEl.style.display='block';return;}
   const uid=authData.user.id;
-  const profileResult=await db.from('player_profiles').insert({user_id:uid,username,display_name:name,colour:selectedColour});
-  if(profileResult.error){await db.auth.signOut();errEl.textContent='Could not create player profile: '+profileResult.error.message;errEl.style.display='block';return;}
 
   // Claim the existing browser-owned weekly entry when this player is upgrading from the old login system.
   let participant=null;
