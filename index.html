@@ -1575,7 +1575,7 @@ function renderEventPreview() {
         <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--mid);">
           <div>
             <div style="font-size:14px; font-weight:600;">${r.name}</div>
-            <div style="font-size:11px; color:var(--text-dim);">${r.runners ? r.runners.length : 0} runners · ${new Date(r.race_time).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', timeZone: guessTimezone(r.track) })}</div>
+            <div style="font-size:11px; color:var(--text-dim);">${r.runners ? r.runners.length : 0} runners · ${perthTime(r.race_time)}</div>
           </div>
           <span class="pill ${r.status === 'settled' ? 'pill-gold' : 'pill-green'}">${r.status === 'settled' ? 'Settled' : 'Open'}</span>
         </div>
