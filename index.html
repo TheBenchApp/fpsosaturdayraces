@@ -982,7 +982,7 @@
 
   <!-- Header -->
   <div class="app-header">
-    <div class="app-logo">FPSO<span>RACE</span></div>
+    <div class="app-logo">RACE<span>DAY</span></div>
     <div class="header-right">
       <div class="user-badge" id="user-badge">
         <span class="horse-dot" id="user-badge-dot"></span>
@@ -2373,6 +2373,34 @@ async function addLoadedRace(apiId) {
   renderRaces();
 }
 
+async function refreshSportsbetRace(raceId) {
+  const race = state.races.find(x => String(x.id) === String(raceId));
+  if (!race?.api_id) { showToast('No provider race ID for this race', 'warn'); return; }
+  try {
+    const res = await fetch('/.netlify/functions/odds-api-net?action=race_odds&event_id=' + encodeURIComponent(race.api_id));
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.error || 'Sportsbet refresh failed');
+    const sportsbet = (payload.items || []).find(x => String(x.bookmaker_name || '').toLowerCase() === 'sportsbet');
+    if (!sportsbet?.runners?.length) throw new Error('Sportsbet prices are not available yet');
+    race.runners = sportsbet.runners.map(x => ({
+      number:x.runner_number, name:x.runner_name || 'Runner', jockey:x.jockey_name || '', trainer:x.trainer_name || '',
+      scratched:Boolean(x.is_scratched || x.runner_status === 'SCRATCHED'), odds:x.win_odds ?? null,
+      place_odds:x.place_odds ?? null, selection_id:x.selection_id || null
+    }));
+    race.odds_as_of = payload.as_of_ts_ms || Date.now();
+    const active = race.runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((a,b)=>Number(a.odds)-Number(b.odds)||Number(a.number)-Number(b.number));
+    race.odds_snapshot_favourite = active[0] ? {number:active[0].number,name:active[0].name,win_odds:active[0].odds,captured_at:race.odds_as_of} : null;
+    // Only call this the pre-race favourite when refreshed within 10 minutes of the advertised jump.
+    const jump = new Date(race.race_time).getTime();
+    if (active[0] && Math.abs(jump - race.odds_as_of) <= 10*60*1000) {
+      race.pre_race_favourite = {...race.odds_snapshot_favourite};
+      race.favourite_number = active[0].number;
+    }
+    renderAdminRaceList(); renderRaces();
+    showToast('Sportsbet field and prices refreshed', 'success');
+  } catch(e) { showToast(e.message, 'warn'); }
+}
+
 async function addRaceToEvent(apiId, name, track) {
   if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
 
@@ -2414,9 +2442,10 @@ function renderAdminRaceList() {
     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--dark3); border-radius:6px; margin-bottom:8px;">
       <div>
         <div style="font-weight:600;">Race ${r.race_number} — ${r.track}</div>
-        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status}</div>
+        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status}${r.odds_as_of ? ' · Sportsbet '+new Date(r.odds_as_of).toLocaleTimeString('en-AU',{timeZone:'Australia/Perth',hour:'numeric',minute:'2-digit'})+' AWST' : ''}</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-outline btn-sm" onclick="refreshSportsbetRace('${r.id}')">↻ Odds</button>
         <span class="pill ${r.status === 'settled' ? 'pill-gold' : 'pill-green'}">${r.status}</span>
         <button class="btn btn-danger btn-sm" onclick="removeRace('${r.id}')">✕</button>
       </div>
