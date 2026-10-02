@@ -2607,11 +2607,10 @@ async function loadRaceCard() {
       page += 1;
     } while (cursor && page < 10);
 
-    loadedRacingCard = items.filter(r => {
-      if (!r.race_start_time) return false;
-      const d = new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Perth',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(Number(r.race_start_time)*1000));
-      return d === date && r.race_country === 'AU' && r.race_type === 'horse-racing';
-    }).map(r => {
+    // The upstream request is already constrained to AU horse racing and this exact
+    // AWST day. Do not re-filter by browser-formatted dates: Safari/Intl formatting
+    // differences can otherwise discard valid races that the provider returned.
+    loadedRacingCard = items.filter(r => Number.isFinite(Number(r.race_start_time))).map(r => {
       const feature = featureRaceMeta(date, r.race_venue, r.race_number);
       return {
         id:r.event_id, track:titleCase(r.race_venue || 'Unknown track'), race_number:r.race_number,
@@ -2623,7 +2622,11 @@ async function loadRaceCard() {
         provider:'odds-api.net'
       };
     }).sort((a,b)=>new Date(a.time)-new Date(b.time));
-    if (!loadedRacingCard.length) throw new Error('No Australian races returned for ' + date + '.');
+    if (!loadedRacingCard.length) {
+      throw new Error(items.length
+        ? 'The racing API returned ' + items.length + ' item(s) for ' + date + ', but none had a valid start time.'
+        : 'The racing provider returned 0 Australian horse races for ' + date + '.');
+    }
     document.getElementById('auto-card-btn').style.display = loadedRacingCard.length >= 10 ? 'inline-flex' : 'none';
     clearGeneratedCard();
   } catch (e) {
