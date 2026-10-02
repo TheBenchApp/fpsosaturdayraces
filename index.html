@@ -2340,39 +2340,53 @@ function autoGenerateCard() {
   if (loadedRacingCard.length < 10) { showToast('Not enough races loaded', 'warn'); return; }
   const start = 9*60+30, end = 16*60;
   const targets = Array.from({length:10}, (_,i)=> start + ((end-start)*i/9));
-  const chosen = [], used = new Set();
+  const chosen = [], used = new Set(), venueCounts = new Map();
+  const venueKey = r => String(r.track || r.venue || '').trim().toLowerCase();
+  const venueAvailable = r => (venueCounts.get(venueKey(r)) || 0) < 2;
+  const addPick = r => {
+    chosen.push(r); used.add(r.id);
+    const key = venueKey(r);
+    venueCounts.set(key, (venueCounts.get(key) || 0) + 1);
+  };
+  const clashes = r => {
+    const minute = raceMinuteAWST(r);
+    return chosen.some(x => minute !== null && raceMinuteAWST(x) !== null && Math.abs(minute-raceMinuteAWST(x)) < 10);
+  };
 
-  // Group races are deliberately selected first.
-  [...loadedRacingCard].sort((a,b)=>groupPriority(b)-groupPriority(a)).filter(r=>groupPriority(r)>0).forEach(r=>{
-    if (chosen.length >= 10 || used.has(r.id)) return;
-    const minute=raceMinuteAWST(r);
-    const clashes=chosen.some(x=>minute!==null && raceMinuteAWST(x)!==null && Math.abs(minute-raceMinuteAWST(x))<10);
-    if (!clashes || groupPriority(r)===3) { chosen.push(r); used.add(r.id); }
-  });
+  // Feature races first, but never let one meeting dominate the 10-race card.
+  [...loadedRacingCard]
+    .filter(r => groupPriority(r) > 0)
+    .sort((a,b) => groupPriority(b)-groupPriority(a) || (raceMinuteAWST(a) ?? 9999)-(raceMinuteAWST(b) ?? 9999))
+    .forEach(r => {
+      if (chosen.length >= 10 || used.has(r.id) || !venueAvailable(r)) return;
+      if (!clashes(r) || groupPriority(r) === 3) addPick(r);
+    });
 
-  // Fill remaining slots near evenly spaced AWST target times, avoiding clashes.
+  // Fill remaining slots near evenly spaced AWST target times, still enforcing max 2 per venue.
   for (const target of targets) {
     if (chosen.length >= 10) break;
-    const candidates=loadedRacingCard.filter(r=>!used.has(r.id)).sort((a,b)=>{
-      const am=raceMinuteAWST(a), bm=raceMinuteAWST(b);
-      const ap=groupPriority(a), bp=groupPriority(b);
-      const ad=am===null ? 9999 : Math.abs(am-target);
-      const bd=bm===null ? 9999 : Math.abs(bm-target);
-      return (bp-ap)*1000 + ad-bd;
-    });
-    const pick=candidates.find(r=>{
-      const m=raceMinuteAWST(r);
-      return !chosen.some(x=>m!==null && raceMinuteAWST(x)!==null && Math.abs(m-raceMinuteAWST(x))<10);
-    }) || candidates[0];
-    if (pick) { chosen.push(pick); used.add(pick.id); }
+    const candidates = loadedRacingCard
+      .filter(r => !used.has(r.id) && venueAvailable(r))
+      .sort((a,b) => {
+        const am=raceMinuteAWST(a), bm=raceMinuteAWST(b);
+        const ap=groupPriority(a), bp=groupPriority(b);
+        const ad=am===null ? 9999 : Math.abs(am-target);
+        const bd=bm===null ? 9999 : Math.abs(bm-target);
+        return (bp-ap)*1000 + ad-bd;
+      });
+    const pick = candidates.find(r => !clashes(r)) || candidates[0];
+    if (pick) addPick(pick);
   }
 
+  if (chosen.length < 10) {
+    showToast('Could only build ' + chosen.length + ' races while keeping the 2-per-track limit. Add races manually if needed.', 'warn');
+  }
   loadedRacingCard.forEach(r=>r.autoSelected=used.has(r.id));
   renderLoadedRaces(loadedRacingCard);
   document.getElementById('clear-auto-btn').style.display='inline-flex';
-  document.getElementById('accept-auto-btn').style.display='inline-flex';
+  document.getElementById('accept-auto-btn').style.display=chosen.length===10 ? 'inline-flex' : 'none';
   document.getElementById('regen-auto-btn').style.display='inline-flex';
-  showToast('10-race draft generated — review before accepting', 'success');
+  if (chosen.length===10) showToast('10-race draft generated — max 2 races per track', 'success');
 }
 
 function clearGeneratedCard() {
