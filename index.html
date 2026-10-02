@@ -1716,8 +1716,8 @@ async function submitRegistration() {
     try{
       const old=JSON.parse(saved);
       if(String(old.event_id)===String(state.currentEvent.id)&&old.name.trim().toLowerCase()===name.toLowerCase()){
-        const claim=await db.from('participants').update({account_id:uid}).eq('id',old.id).is('account_id',null).select().maybeSingle();
-        if(!claim.error) participant=claim.data;
+        const claim=await db.rpc('claim_legacy_participant',{p_participant_id:old.id});
+        if(!claim.error) participant=Array.isArray(claim.data) ? claim.data[0] : claim.data;
       }
     }catch(e){}
   }
