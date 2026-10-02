@@ -24,13 +24,14 @@ export default async (request) => {
     events: "/racing/events",
     results: "/racing/results",
     form: "/racing/form",
+    next: "/racing/next-to-go",
     markets: "/racing/markets",
     usage: "/usage",
   };
   if (!endpoints[action]) return json({ ok:false, error:"Unsupported racing action" }, 400);
 
   const upstream = new URL(BASE + endpoints[action]);
-  const allowed = ["date","venue","hours_ahead","country","category","categories","include_unresolved","status","hours_back","race_id","meeting_date","race_number","runs","bookmakers","markets"];
+  const allowed = ["date","venue","hours_ahead","country","category","categories","include_unresolved","status","hours_back","race_id","meeting_date","race_number","runs","bookmakers","markets","num_races","maxAgeMinutes"];
   for (const name of allowed) {
     const value = url.searchParams.get(name);
     if (value !== null && value !== "") upstream.searchParams.set(name, value);
