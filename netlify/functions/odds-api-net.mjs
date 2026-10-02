@@ -1,3 +1,4 @@
+// Deployment marker: racing-diagnostic-v2
 const BASE = "https://api.odds-api.net/v1";
 
 export default async (request) => {
