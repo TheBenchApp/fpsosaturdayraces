@@ -1366,12 +1366,8 @@ async function restoreAuthenticatedPlayer(authUser) {
   if (!state.currentEvent) { state.user = { account_id: authUser.id, name: profile.display_name, colour: profile.colour }; showMainApp(); return; }
   let { data: participant, error } = await db.from('participants').select('*').eq('event_id', state.currentEvent.id).eq('account_id', authUser.id).maybeSingle();
   if (error) { showToast('Could not restore profile: ' + error.message, 'danger'); showLanding(); return; }
-  if (!participant && !isSelectionsLocked()) {
-    const created = await db.from('participants').insert({event_id:state.currentEvent.id,account_id:authUser.id,name:profile.display_name,colour:profile.colour}).select().single();
-    if (created.error) { showToast('Could not enter this event: ' + created.error.message, 'danger'); showLanding(); return; }
-    participant = created.data;
-    await loadCurrentEvent();
-  }
+  // A permanent account is not automatically a weekly entry.
+  // Only registration/entry creation should create a participant for the current event.
   if (participant) {
     state.user = { id:participant.id, account_id:authUser.id, name:participant.name, colour:participant.colour, event_id:participant.event_id };
     localStorage.setItem('raceday_user', JSON.stringify(state.user));
