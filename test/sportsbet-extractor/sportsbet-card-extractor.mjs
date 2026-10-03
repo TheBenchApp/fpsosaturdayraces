@@ -126,8 +126,9 @@ export function validateRace(race){
     if(!n) errors.push("missing_horse_name");
     if(n&&names.has(n)) errors.push("duplicate_horse_name"); if(n) names.add(n);
   }
-  if(!race.start_time) warnings.push("start_time_unresolved");
-  if(!race.distance) warnings.push("distance_unresolved");
+  if(!race.start_time || Number.isNaN(new Date(race.start_time).getTime())) errors.push("missing_or_invalid_start_time");
+  if(!race.distance || race.distance<500 || race.distance>5000) errors.push("missing_or_invalid_distance");
+  if(!clean(race.race_name)) errors.push("missing_race_name");
   return {ok:errors.length===0,errors:[...new Set(errors)],warnings:[...new Set(warnings)]};
 }
 
