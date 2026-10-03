@@ -20,4 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: node test/betfair-card/betfair-card.test.mjs\n      - run: node test/betfair-card/auto-generate-10.test.mjs
+      - name: Betfair card normalisation and fail-closed validation
+        run: node test/betfair-card/betfair-card.test.mjs
+      - name: Auto Generate 10 selection
+        run: node test/betfair-card/auto-generate-10.test.mjs
