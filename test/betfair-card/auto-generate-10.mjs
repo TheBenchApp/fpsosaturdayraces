@@ -8,7 +8,7 @@ export function autoGenerate10(meetings,{minGapMinutes=12,startMinutes=570,endMi
  all.sort((a,b)=>a.perth_minutes-b.perth_minutes);
  const chosen=[];
  // First reserve Group races, highest grade first, while respecting spacing.
- const groups=all.filter(r=>r.group_level).sort((a,b)=>(GROUP_SCORE[b.group_level]-GROUP_SCORE[a.group_level])||a.perth_minutes-b.perth_minutes);
+ const groups=all.filter(r=>r.group_level).sort((a,b)=>(GROUP_SCORE[a.group_level]-GROUP_SCORE[b.group_level])||a.perth_minutes-b.perth_minutes);
  const canAdd=r=>chosen.every(x=>Math.abs(x.perth_minutes-r.perth_minutes)>=minGapMinutes);
  for(const r of groups)if(chosen.length<10&&canAdd(r))chosen.push(r);
  // Fill remaining slots by repeatedly choosing the race furthest from already selected times and ideal evenly-spaced target slots.
