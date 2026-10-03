@@ -2171,10 +2171,14 @@ function renderChampionBanner(scores) {
   const topTotal = scores[0].total;
   const winners = scores.filter(p => Math.abs(p.total - topTotal) < 0.0001);
   const joint = winners.length > 1;
+  const raceDateSource = state.races[0]?.race_time || state.currentEvent?.lockout_time;
+  const raceDate = raceDateSource ? new Intl.DateTimeFormat('en-AU', {
+    timeZone:'Australia/Perth', day:'2-digit', month:'2-digit', year:'2-digit'
+  }).format(new Date(raceDateSource)) : '';
   const names = winners.map(p => escapeHtml(p.name)).join(' & ');
   const horses = winners.map(p => `<span class="champion-horse" style="color:${p.colour || '#fff600'};">🐎</span>`).join(' ');
   banner.innerHTML = `
-    <div class="champion-kicker">${joint ? '🏆 FPSO SATURDAY RACES — JOINT CHAMPIONS 🏆' : '🏆 FPSO SATURDAY RACES CHAMPION 🏆'}</div>
+    <div class="champion-kicker">🏆 FPSO SATURDAY ${raceDate} RACES ${joint ? 'JOINT CHAMPIONS' : 'CHAMPION'} 🏆</div>
     <div class="champion-name">${names}</div>
     <div class="champion-total">$${topTotal.toFixed(2)}</div>
     <div class="champion-footer">${horses}<br>👑 ${joint ? 'KINGS OF THE FPSO' : 'KING OF THE FPSO'} 👑</div>
