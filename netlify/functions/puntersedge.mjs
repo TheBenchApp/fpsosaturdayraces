@@ -11,6 +11,7 @@ export default async (request) => {
   let path;
   if (action === "acceptances") path = "/racing/acceptances";
   else if (action === "next_to_go") path = "/racing/next-to-go";
+  else if (action === "results") path = "/racing/results";
   else return new Response(JSON.stringify({error:"Unsupported PuntersEdge action"}),{status:400,headers:{"content-type":"application/json","cache-control":"no-store"}});
 
   const upstream = new URL(BASE + path);
