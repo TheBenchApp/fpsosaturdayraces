@@ -35,7 +35,7 @@ exports.handler=async event=>{
   const app=process.env.BETFAIR_APP_KEY;const loginBody=new URLSearchParams({username:process.env.BETFAIR_USERNAME,password:process.env.BETFAIR_PASSWORD}).toString();
   const login=await post("identitysso-cert.betfair.com.au","/api/certlogin",{"X-Application":app,"Content-Type":"application/x-www-form-urlencoded"},loginBody,process.env.BETFAIR_CLIENT_CERT,process.env.BETFAIR_CLIENT_KEY);
   let lj={};try{lj=JSON.parse(login.body)}catch{};if(login.status!==200||lj.loginStatus!=="SUCCESS"||!lj.sessionToken)return reply(502,{ok:false,status:"BETFAIR_LOGIN_FAILED",http_status:login.status,login_status:lj.loginStatus||null,auto_generate_enabled:false});
-  const token=lj.sessionToken,from=date+"T00:00:00Z",to=date+"T23:59:59Z";
+  const token=lj.sessionToken;\n  // Perth is UTC+8 year-round: a Perth calendar day begins 16:00Z on the previous UTC date.\n  const perthStart=new Date(date+"T00:00:00+08:00");\n  const perthEnd=new Date(perthStart.getTime()+24*60*60*1000-1);\n  const from=perthStart.toISOString(),to=perthEnd.toISOString();
   const events=await betfair("/listEvents/",{filter:{eventTypeIds:["7"],marketCountries:["AU"],marketStartTime:{from,to}}},app,token);
   const ids=events.map(x=>x.event?.id).filter(Boolean);
   const catalogue=ids.length?await betfair("/listMarketCatalogue/",{filter:{eventTypeIds:["7"],eventIds:ids,marketCountries:["AU"],marketTypeCodes:["WIN"]},marketProjection:["EVENT","MARKET_DESCRIPTION","RUNNER_DESCRIPTION","RUNNER_METADATA","MARKET_START_TIME"],sort:"FIRST_TO_START",maxResults:"1000"},app,token):[];
