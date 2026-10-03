@@ -125,7 +125,7 @@
   /* ===== FIXED EVENT CONTROLS ===== */
   .event-controls-fixed {
     position: sticky;
-    top: 0;
+    top: var(--app-header-height, 76px);
     z-index: 99;
     background: var(--dark2);
     box-shadow: 0 4px 12px rgba(0,0,0,.45);
@@ -885,6 +885,9 @@
     .app-logo { font-size:12px; }
     .nav-tab { padding:11px 13px; font-size:11px; }
   }
+  /* Keep the event banner/nav directly beneath the sticky app header at its real rendered height. */
+  #main-app { --app-header-height: 76px; }
+  @media (max-width:600px) { #main-app { --app-header-height: 116px; } }
 </style>
 <!-- deploy refresh: 2026-10-02 -->
 </head>
@@ -1842,6 +1845,7 @@ function updateBanner() {
 // TABS
 // ============================================================
 function showTab(tab) {
+  syncStickyHeaderHeight();
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('section-' + tab).classList.add('active');
@@ -3300,6 +3304,14 @@ for (const actionName of ['submitRegistration', 'playerLogin', 'saveSelections',
 }
 // app started via loadScript chain above
 
+
+function syncStickyHeaderHeight() {
+  const header = document.querySelector('#main-app .app-header');
+  const app = document.getElementById('main-app');
+  if (header && app) app.style.setProperty('--app-header-height', header.getBoundingClientRect().height + 'px');
+}
+window.addEventListener('resize', syncStickyHeaderHeight);
+window.addEventListener('orientationchange', syncStickyHeaderHeight);
 </script>
 
 <!-- Backend: restored Supabase project with explicit grants and RLS. Redeploy marker: PR13 batch. -->
