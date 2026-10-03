@@ -902,6 +902,8 @@
   @keyframes championShift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
   @keyframes championPulse{from{transform:scale(1);filter:saturate(1)}to{transform:scale(1.008);filter:saturate(1.25)}}
   @media (max-width:600px){.champion-art{right:1%;width:25%;max-height:58%}}
+  .all-selection-pick{font-size:11px;line-height:1.15;white-space:normal;overflow-wrap:anywhere;display:block;min-width:72px;max-width:110px}
+  @media (max-width:600px){.all-selection-pick{font-size:10px;line-height:1.12;min-width:66px;max-width:96px}}
   @media (prefers-reduced-motion:reduce){.champion-banner{animation:none}}
 </style>
 <!-- deploy refresh: 2026-10-02 -->
@@ -1847,7 +1849,9 @@ function showMainApp() {
     document.getElementById('user-badge-dot').style.background = state.user.colour;
   }
 
-  showTab('races');
+  // Players land on Races while selections are open, then Race Day once lockout starts.
+  // Admin is sent to the Admin section immediately by checkLocalUser().
+  showTab(!state.isAdmin && isSelectionsLocked() ? 'leaderboard' : 'races');
   updateBanner();
   renderRaces();
   renderLeaderboard();
@@ -2251,7 +2255,7 @@ function renderAllSelections(participants) {
               ${state.races.map(r => {
                 const sel = p.selections[r.id];
                 const runner = r.runners?.find(ru => ru.number == sel);
-                return `<td class="text-sm">${sel ? `#${sel} ${runner ? runner.name.split(' ')[0] : ''}` : '<span class="text-dim">—</span>'}</td>`;
+                return `<td><span class="all-selection-pick">${sel ? `#${sel} ${runner ? escapeHtml(runner.name) : ''}` : '<span class="text-dim">—</span>'}</span></td>`;
               }).join('')}
             </tr>
           `).join('')}
