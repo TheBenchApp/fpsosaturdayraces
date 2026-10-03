@@ -486,6 +486,8 @@
   }
 
   /* ===== CHAT ===== */
+  .chat-unread-badge { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; margin-left:4px; border-radius:10px; background:var(--red); color:#fff; font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700; line-height:18px; vertical-align:middle; }
+
   .chat-container {
     display: flex;
     flex-direction: column;
@@ -1078,9 +1080,8 @@
   <!-- Nav -->
   <div class="nav-tabs" id="main-nav">
     <button class="nav-tab active" onclick="showTab('races')" id="tab-races">🏁 Races</button>
-    <button class="nav-tab" onclick="showTab('leaderboard')" id="tab-leaderboard">🏆 Leaderboard</button>
-    <button class="nav-tab" onclick="showTab('tracker')" id="tab-tracker">🐎 Race Tracker</button>
-    <button class="nav-tab" onclick="showTab('chat')" id="tab-chat">💬 Chat</button>
+    <button class="nav-tab" onclick="showTab('leaderboard')" id="tab-leaderboard">🏆 Race Day</button>
+    <button class="nav-tab" onclick="showTab('chat')" id="tab-chat">💬 Chat <span id="chat-unread-badge" class="chat-unread-badge" style="display:none;">0</span></button>
   </div>
 
   <div class="main">
@@ -1107,30 +1108,23 @@
       </div>
     </div>
 
-    <!-- ===== LEADERBOARD TAB ===== -->
+    <!-- ===== RACE DAY TAB ===== -->
     <div class="section" id="section-leaderboard">
       <div class="card">
-        <div class="card-title">🏆 Leaderboard</div>
-        <div id="leaderboard-empty" class="text-dim text-sm" style="display:none;">No results yet. Races haven't been settled.</div>
-        <div id="leaderboard-content"></div>
-      </div>
-
-      <div class="card" style="margin-top:16px;">
         <div class="card-title">📋 All Selections</div>
         <div id="all-selections-content"></div>
       </div>
-    </div>
-
-    <!-- ===== TRACKER TAB ===== -->
-    <div class="section" id="section-tracker">
-      <div class="track-container">
-        <div class="track-title">🏇 THE FIELD</div>
-        <div class="track-lanes" id="track-lanes">
-          <div class="text-dim text-sm" style="text-align:center; padding:20px;">Waiting for participants and results...</div>
+      <div style="margin-top:16px;">
+        <div class="track-container">
+          <div class="track-title">🏇 RACE TRACKER</div>
+          <div class="track-lanes" id="track-lanes"><div class="text-dim text-sm" style="text-align:center; padding:20px;">Waiting for participants and results...</div></div>
         </div>
+        <div style="margin-top:12px; font-size:11px; color:var(--text-dim); text-align:center;">Horse position reflects cumulative Sportsbet payouts. Updates as races are settled.</div>
       </div>
-      <div style="margin-top:12px; font-size:11px; color:var(--text-dim); text-align:center;">
-        Horse position reflects cumulative Sportsbet payouts. Updates as races are settled.
+      <div class="card" style="margin-top:16px;">
+        <div class="card-title">🏆 Leaderboard</div>
+        <div id="leaderboard-empty" class="text-dim text-sm" style="display:none;">No results yet. Races haven't been settled.</div>
+        <div id="leaderboard-content"></div>
       </div>
     </div>
 
@@ -1842,9 +1836,8 @@ function showTab(tab) {
   document.getElementById('tab-' + tab).classList.add('active');
 
   if (tab === 'races') renderRaces();
-  if (tab === 'leaderboard') renderLeaderboard();
-  if (tab === 'tracker') renderTracker();
-  if (tab === 'chat') scrollChat();
+  if (tab === 'leaderboard') { renderLeaderboard(); renderTracker(); }
+  if (tab === 'chat') { markChatRead(); scrollChat(); }
 }
 
 function goAdmin() {
@@ -2126,7 +2119,7 @@ function renderAllSelections(participants) {
         <thead>
           <tr>
             <th>Name</th>
-            ${state.races.map(r => `<th>R${r.race_number}</th>`).join('')}
+            ${state.races.map((r, i) => `<th title="${escapeHtml(r.track || '')} R${r.race_number}"><span style="white-space:nowrap;">${i + 1} · ${escapeHtml(r.track || 'Race')} R${r.race_number}</span></th>`).join('')}
           </tr>
         </thead>
         <tbody>
@@ -2185,6 +2178,28 @@ function renderTracker() {
 // CHAT
 // ============================================================
 let chatMessages = [];
+let chatUnreadCount = 0;
+
+function chatReadKey() { return 'fpso_chat_read_' + (state.currentEvent?.id || 'none'); }
+function isOwnChatMessage(m) { return state.isAdmin ? m.sender === 'ADMIN' : !!(state.user && m.sender === state.user.name); }
+function updateChatUnreadBadge() {
+  const badge = document.getElementById('chat-unread-badge');
+  if (!badge) return;
+  badge.textContent = chatUnreadCount > 99 ? '99+' : String(chatUnreadCount);
+  badge.style.display = chatUnreadCount > 0 ? 'inline-flex' : 'none';
+}
+function markChatRead() {
+  chatUnreadCount = 0;
+  const times = chatMessages.map(m => new Date(m.ts).getTime()).filter(Number.isFinite);
+  localStorage.setItem(chatReadKey(), String(times.length ? Math.max(...times) : Date.now()));
+  updateChatUnreadBadge();
+}
+function refreshUnreadFromLoadedChat() {
+  const lastRead = Number(localStorage.getItem(chatReadKey()) || 0);
+  chatUnreadCount = chatMessages.filter(m => !isOwnChatMessage(m) && new Date(m.ts).getTime() > lastRead).length;
+  if (document.getElementById('section-chat')?.classList.contains('active')) markChatRead();
+  else updateChatUnreadBadge();
+}
 
 function renderChat() {
   const lockedMsg = document.getElementById('chat-locked-msg');
@@ -2284,6 +2299,7 @@ async function loadChatFromDB() {
     text: m.message,
     ts: new Date(m.created_at),
   }));
+  refreshUnreadFromLoadedChat();
   renderChatMessages();
 }
 
@@ -3207,6 +3223,10 @@ function setupRealtimeSubs() {
         }
         if (document.getElementById('section-chat').classList.contains('active')) {
           renderChatMessages();
+          markChatRead();
+        } else if (!isOwnChatMessage({ sender: m.participant_name })) {
+          chatUnreadCount += 1;
+          updateChatUnreadBadge();
         }
       })
     .subscribe();
