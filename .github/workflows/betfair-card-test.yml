@@ -15,4 +15,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: node test/betfair-card/betfair-card.test.mjs
+      - run: node test/betfair-card/betfair-card.test.mjs\n      - run: node test/betfair-card/auto-generate-10.test.mjs
