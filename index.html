@@ -1910,7 +1910,7 @@ function renderRaces() {
         <div class="race-header">
           <div>
             <div class="race-title">Race ${race.race_number} — ${race.track}</div>
-            <div class="race-meta">${perthTime(race.race_time).replace(' AWST','')} AWST · ${race.runners?.length || 0} runners</div>
+            <div class="race-meta">${perthTime(race.race_time)} · ${race.runners?.length || 0} runners</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
             ${settled ? `<span class="pill pill-gold">Settled</span>` : `<span class="pill pill-green">Open</span>`}
@@ -2986,7 +2986,7 @@ function renderAdminRaceList() {
     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--dark3); border-radius:6px; margin-bottom:8px;">
       <div>
         <div style="font-weight:600;">Race ${r.race_number} — ${r.track}</div>
-        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status}${r.odds_as_of ? ' · Sportsbet '+perthTime(r.odds_as_of).replace(' AWST','')+' AWST' : ''}</div>
+        <div class="text-xs text-dim">${(r.runners||[]).length} runners · ${r.status} · Jump ${perthTime(r.race_time)}${r.odds_as_of ? ' · Odds refreshed '+perthTime(r.odds_as_of) : ''}</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="btn btn-outline btn-sm" onclick="refreshSportsbetRace('${r.id}')">↻ Odds</button>
@@ -3026,7 +3026,7 @@ function renderSettleList() {
       <div style="margin-bottom:10px; font-size:12px; color:var(--text-dim);"><strong>Runners:</strong> ${(race.runners||[]).map(r => `#${r.number} ${r.name}`).join(' · ')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
         <button class="btn btn-outline btn-sm" onclick="fetchFinalResult('${race.id}')">↻ Fetch Final Result</button>
-        <span id="result-status-${race.id}" class="text-xs text-dim" style="align-self:center;">PuntersEdge final result + settled prices</span>
+        <span id="result-status-${race.id}" class="text-xs text-dim" style="align-self:center;">PuntersEdge final placings · Sportsbet dividends entered manually</span>
       </div>
       <div class="form-group" style="margin-bottom:10px;">
         <label>Pre-race favourite #</label>
