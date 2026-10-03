@@ -1,0 +1,5 @@
+[build.environment]
+  # BETFAIR_PASSWORD is supplied only as a Netlify environment variable at runtime.
+  # Netlify masks its key name in logs and its value produced a false-positive
+  # repository/build-output match. Keep scanning enabled for every other secret.
+  SECRETS_SCAN_OMIT_KEYS = "BETFAIR_PASSWORD"
