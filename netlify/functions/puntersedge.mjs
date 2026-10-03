@@ -38,7 +38,10 @@ export default async (request) => {
       const date = url.searchParams.get("date");
       if (acceptances && Array.isArray(acceptances.meetings) && /^\\d{4}-\\d{2}-\\d{2}$/.test(date || "")) {
         const eventsUrl = new URL(BASE + "/racing/events");
-        eventsUrl.searchParams.set("date", date);
+        // A whole-date request can 403 until the end of that AET day fits inside the plan horizon.
+        // A rolling 24h request enriches whichever races are currently reachable; acceptances local
+        // time remains the authoritative early-card fallback for races beyond the events horizon.
+        eventsUrl.searchParams.set("hours_ahead", "24");
         eventsUrl.searchParams.set("categories", "horse");
         eventsUrl.searchParams.set("country", "AU");
         eventsUrl.searchParams.set("include_unresolved", "true");
