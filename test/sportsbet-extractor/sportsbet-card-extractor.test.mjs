@@ -10,8 +10,8 @@ const links=extractMeetingRaceLinks(linkHtml);
 assert.equal(links.length,3); assert.equal(links[2].race_number,3); assert.equal(links[1].sportsbet_race_id,"22222222");
 
 const runner=n=>({runner_number:n,horse_name:`Horse ${n}`,scratched:false});
-const race=(n,id=String(1000+n))=>({venue:"Northam",race_number:n,sportsbet_race_id:id,runners:[runner(1),runner(2)],start_time:"2026-10-04T04:00:00Z",distance:1200});
-assert.equal(validateRace(race(1)).ok,true);
+const race=(n,id=String(1000+n))=>({venue:"Northam",race_number:n,sportsbet_race_id:id,runners:[runner(1),runner(2)],start_time:"2026-10-04T04:00:00Z",distance:1200,race_name:`Race ${n}`});
+assert.equal(validateRace(race(1)).ok,true);\nconst noTime=race(1); noTime.start_time=null; assert(validateRace(noTime).errors.includes("missing_or_invalid_start_time"));
 assert.equal(validateMeeting({venue:"Northam",expected_race_count:3,races:[race(1),race(2),race(3)]}).ok,true);
 
 const missing=validateMeeting({venue:"Northam",expected_race_count:3,races:[race(1),race(3)]});
