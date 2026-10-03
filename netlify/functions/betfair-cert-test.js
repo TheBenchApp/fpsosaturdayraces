@@ -1,6 +1,13 @@
 const https = require("https");
 const required=["BETFAIR_USERNAME","BETFAIR_PASSWORD","BETFAIR_APP_KEY","BETFAIR_CLIENT_CERT","BETFAIR_CLIENT_KEY"];
-const clean=v=>String(v??"").replace(/\s+/g," ").trim();
+const clean=v=>String(v??"").replace(/\\s+/g," ").trim();
+const pem=v=>{
+ let s=String(v??"").trim();
+ // Netlify multiline secrets are sometimes pasted with literal \\n sequences or surrounding quotes.
+ if((s.startsWith('"')&&s.endsWith('"'))||(s.startsWith("'")&&s.endsWith("'"))) s=s.slice(1,-1);
+ s=s.replace(/\\\\n/g,"\n").replace(/\\r\\n/g,"\n").trim();
+ return s;
+};
 const num=v=>Number.isFinite(Number(v))?Number(v):null;
 const reply=(statusCode,body)=>({statusCode,headers:{"content-type":"application/json","cache-control":"no-store"},body:JSON.stringify(body)});
 function post(hostname,path,headers,body,cert,key){
@@ -33,7 +40,7 @@ exports.handler=async event=>{
   const missing=required.filter(k=>!process.env[k]);if(missing.length)return reply(500,{ok:false,status:"BETFAIR_SECRETS_MISSING",missing,auto_generate_enabled:false});
   const date=event?.queryStringParameters?.date;if(!/^\d{4}-\d{2}-\d{2}$/.test(date||""))return reply(400,{ok:false,status:"DATE_REQUIRED",message:"Use ?date=YYYY-MM-DD",auto_generate_enabled:false});
   const app=process.env.BETFAIR_APP_KEY;const loginBody=new URLSearchParams({username:process.env.BETFAIR_USERNAME,password:process.env.BETFAIR_PASSWORD}).toString();
-  const login=await post("identitysso-cert.betfair.com.au","/api/certlogin",{"X-Application":app,"Content-Type":"application/x-www-form-urlencoded"},loginBody,process.env.BETFAIR_CLIENT_CERT,process.env.BETFAIR_CLIENT_KEY);
+  const login=await post("identitysso-cert.betfair.com.au","/api/certlogin",{"X-Application":app,"Content-Type":"application/x-www-form-urlencoded"},loginBody,pem(process.env.BETFAIR_CLIENT_CERT),pem(process.env.BETFAIR_CLIENT_KEY));
   let lj={};try{lj=JSON.parse(login.body)}catch{};if(login.status!==200||lj.loginStatus!=="SUCCESS"||!lj.sessionToken)return reply(502,{ok:false,status:"BETFAIR_LOGIN_FAILED",http_status:login.status,login_status:lj.loginStatus||null,auto_generate_enabled:false});
   const token=lj.sessionToken;
   // Perth is UTC+8 year-round: a Perth calendar day begins 16:00Z on the previous UTC date.
