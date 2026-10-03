@@ -1195,7 +1195,7 @@
               <input type="date" id="race-date-input">
               <button class="btn btn-primary btn-sm" onclick="loadRaceCard()">Load AU Card</button>
             </div>
-            <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds via odds-api.net · Sportsbet prices · all times shown in Perth (AWST).</div>
+            <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds via PuntersEdge · Sportsbet prices · all times shown in Perth (AWST).</div>
           </div>
           <div class="form-group">
             <label>Filter loaded card</label>
@@ -2571,93 +2571,42 @@ function nextSaturdayISO() {
 async function searchRaces() { return loadRaceCard(); }
 
 async function loadRaceCard() {
-  const input = document.getElementById('race-date-input');
-  if (!input.value) input.value = nextSaturdayISO();
-  const date = input.value;
-  const container = document.getElementById('race-search-results');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    container.innerHTML = '<div class="alert alert-warn">Choose a valid race date.</div>';
-    return;
-  }
-  container.innerHTML = '<div class="text-dim text-sm">Loading Australian race card for ' + escapeHtml(formatPerthDate(date)) + '…</div>';
+  const input=document.getElementById('race-date-input');
+  if (!input.value) input.value=nextSaturdayISO();
+  const date=input.value, container=document.getElementById('race-search-results');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { container.innerHTML='<div class="alert alert-warn">Choose a valid race date.</div>'; return; }
+  container.innerHTML='<div class="text-dim text-sm">Loading Australian thoroughbred acceptances for '+escapeHtml(formatPerthDate(date))+'…</div>';
   try {
-    // Query the provider for the exact selected AWST calendar day. Perth has no DST,
-    // so this is a stable midnight-to-midnight 24-hour window.
-    const startFrom = Math.floor(new Date(date + 'T00:00:00+08:00').getTime() / 1000);
-    const startTo = startFrom + 86400;
-    let items = [];
-    let cursor = null;
-    let page = 0;
-    do {
-      const params = new URLSearchParams({
-        action:'racing',
-        race_type:'horse-racing',
-        race_country:'AU',
-        start_from:String(startFrom),
-        start_to:String(startTo),
-        limit:'100'
-      });
-      if (cursor) params.set('cursor', cursor);
-      const res = await fetch('/.netlify/functions/odds-api-net?' + params.toString());
-      const payload = await res.json();
-      if (!res.ok) throw new Error(payload.error || 'Odds API request failed');
-      const pageItems = payload.items || payload.data?.items || payload.data || [];
-      if (Array.isArray(pageItems)) items.push(...pageItems);
-      cursor = payload.next_cursor || payload.data?.next_cursor || null;
-      page += 1;
-    } while (cursor && page < 10);
-
-    // The upstream request is already constrained to AU horse racing and this exact
-    // AWST day. Do not re-filter by browser-formatted dates: Safari/Intl formatting
-    // differences can otherwise discard valid races that the provider returned.
-    loadedRacingCard = items.filter(r => Number.isFinite(Number(r.race_start_time))).map(r => {
-      const feature = featureRaceMeta(date, r.race_venue, r.race_number);
+    const res=await fetch('/.netlify/functions/puntersedge?action=acceptances&date='+encodeURIComponent(date));
+    const payload=await res.json();
+    if (!res.ok) throw new Error(payload.detail || payload.error || 'PuntersEdge acceptances request failed');
+    const meetings=Array.isArray(payload.meetings) ? payload.meetings : [];
+    loadedRacingCard=meetings.flatMap(m=>(m.races||[]).map(r=>{
+      const venue=m.venue || r.venue || 'Unknown track';
+      const feature=featureRaceMeta(date,venue,r.race_number);
+      const runners=(r.runners||[]).map(x=>({
+        number:x.number ?? x.runner_number, name:x.name || x.runner_name || 'Runner',
+        jockey:x.jockey || '', trainer:x.trainer || '', barrier:x.barrier ?? null,
+        scratched:Boolean(x.scratched), odds:null, place_odds:null, form:x.form || '',
+        emergency:Boolean(x.emergency), runner_ref:x.runner_ref || null, scratching:x.scratching || null
+      }));
+      const providerRaceId=r.race_id || null;
       return {
-        id:r.event_id, track:titleCase(r.race_venue || 'Unknown track'), race_number:r.race_number,
-        name:feature?.name || ('Race ' + (r.race_number || '')),
-        time:new Date(Number(r.race_start_time)*1000).toISOString(), distance:r.race_distance || null,
-        class:feature?.grade || '', conditions:'', runners:[],
-        active_runners:r.active_runners ?? null, total_runners:r.total_runners ?? null,
-        scratched_runners:r.scratched_runners ?? null, runner_count_complete:Boolean(r.runner_count_complete),
-        provider:'odds-api.net'
+        id:providerRaceId || ('peacc:'+date+':'+venue+':'+r.race_number),
+        provider_id:providerRaceId, track:titleCase(venue), race_number:r.race_number,
+        name:feature?.name || r.race_name || r.name || ('Race '+(r.race_number||'')),
+        time:r.start_time || r.race_time || r.advertised_start_time || null,
+        distance:r.distance_m ?? r.distance ?? null, class:feature?.grade || r.race_class || r.class || '',
+        conditions:r.conditions || '', runners,
+        active_runners:runners.filter(x=>!x.scratched).length, total_runners:runners.length,
+        scratched_runners:runners.filter(x=>x.scratched).length, runner_count_complete:true,
+        provider:'puntersedge'
       };
-    }).sort((a,b)=>new Date(a.time)-new Date(b.time));
-    if (!loadedRacingCard.length) {
-      if (items.length) {
-        throw new Error('The racing API returned ' + items.length + ' item(s) for ' + date + ', but none had a valid start time.');
-      }
-
-      // Diagnostic fallback: ask for a wider 72-hour AU horse-racing window around
-      // the selected day. This does not add those races to the card; it only tells
-      // Admin what dates the provider is actually returning so date-window issues
-      // can be distinguished from genuinely missing provider data.
-      const diagParams = new URLSearchParams({
-        action:'racing',
-        race_type:'horse-racing',
-        race_country:'AU',
-        start_from:String(startFrom - 86400),
-        start_to:String(startTo + 86400),
-        limit:'1000'
-      });
-      const diagRes = await fetch('/.netlify/functions/odds-api-net?' + diagParams.toString());
-      const diagPayload = await diagRes.json();
-      const diagItems = diagPayload.items || diagPayload.data?.items || diagPayload.data || [];
-      if (diagRes.ok && Array.isArray(diagItems) && diagItems.length) {
-        const validTimes = diagItems.map(r => Number(r.race_start_time)).filter(Number.isFinite).sort((a,b)=>a-b);
-        const dates = [...new Set(validTimes.map(ts =>
-          new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Perth',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(ts*1000))
-        ))];
-        throw new Error('Provider returned 0 races for ' + date + '. Diagnostic: ' + diagItems.length +
-          ' AU horse races exist in the surrounding 72-hour window; returned Perth date(s): ' +
-          (dates.length ? dates.join(', ') : 'unknown') + '.');
-      }
-      throw new Error('Provider returned 0 races for ' + date + ' and 0 AU horse races in the surrounding 72-hour window.');
-    }
-    document.getElementById('auto-card-btn').style.display = loadedRacingCard.length >= 10 ? 'inline-flex' : 'none';
+    })).filter(r=>r.time && Number.isFinite(new Date(r.time).getTime())).sort((a,b)=>new Date(a.time)-new Date(b.time));
+    if (!loadedRacingCard.length) throw new Error('PuntersEdge returned no timed Australian thoroughbred races for '+date+'.');
+    document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10?'inline-flex':'none';
     clearGeneratedCard();
-  } catch (e) {
-    container.innerHTML = '<div class="alert alert-danger">' + escapeHtml(e.message) + '</div>';
-  }
+  } catch(e) { container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>'; }
 }
 function titleCase(v) { return String(v || '').replace(/\b\w/g, c => c.toUpperCase()); }
 function featureRaceMeta(date, venue, raceNumber) {
@@ -2864,135 +2813,110 @@ async function acceptGeneratedCard() {
 }
 
 async function addLoadedRace(apiId) {
-  if (!db || !state.isAdmin) { showToast('Admin database connection required.', 'danger'); return; }
-  const r = loadedRacingCard.find(x => String(x.id) === String(apiId));
-  if (!r) return;
-  if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
-  if (state.races.length >= 10) { showToast('Competition card is limited to 10 races', 'warn'); return; }
-  if (state.races.some(x => String(x.api_id) === String(r.id))) { showToast('That race is already on the card', 'warn'); return; }
+  if (!db || !state.isAdmin) { showToast('Admin database connection required.','danger'); return; }
+  const r=loadedRacingCard.find(x=>String(x.id)===String(apiId));
+  if (!r || !state.currentEvent) { showToast('Create an event first','warn'); return; }
+  if (state.races.length>=10) { showToast('Competition card is limited to 10 races','warn'); return; }
+  if (state.races.some(x=>String(x.track).toLowerCase()===String(r.track).toLowerCase() && Number(x.race_number)===Number(r.race_number))) { showToast('That race is already on the card','warn'); return; }
 
-  if (!r.runners || !r.runners.length) {
-    try {
-      const oddsRes = await fetch('/.netlify/functions/odds-api-net?action=race_odds&event_id=' + encodeURIComponent(r.id));
-      const oddsPayload = await oddsRes.json();
-      if (!oddsRes.ok) throw new Error(oddsPayload.error || 'Sportsbet odds request failed');
-      const sportsbet = (oddsPayload.items || []).find(x => String(x.bookmaker_name || '').toLowerCase() === 'sportsbet');
-      if (!sportsbet || !Array.isArray(sportsbet.runners)) throw new Error('Sportsbet runner prices are not available for this race yet');
-      r.runners = sportsbet.runners;
-      r.odds_as_of = oddsPayload.as_of_ts_ms || null;
-    } catch (e) {
-      showToast(e.message, 'warn');
-      return;
-    }
-  }
-
-  const runners = (r.runners || []).map(x => ({
-    number: x.runner_number || x.number || x.saddlecloth || x.tab_number,
-    name: x.horse_name || x.runner_name || x.name || 'Runner',
-    jockey: x.jockey || x.jockey_name || '',
-    trainer: x.trainer || x.trainer_name || '',
-    barrier: x.barrier || null,
-    scratched: Boolean(x.scratched || x.is_scratched || x.runner_status === 'SCRATCHED' || x.status === 'scratched'),
-    odds: x.win_odds || x.win_price || x.odds || null,
-    place_odds: x.place_odds || x.place_price || null,
-    form: x.last10 || x.last_10 || x.form || '',
-    emergency: Boolean(x.emergency),
-    runner_ref: x.runner_ref || null,
-    scratching: x.scratching || null
-  }));
-
-  const newRace = {
-    id: 'race_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-    api_id: r.id,
-    event_id: state.currentEvent.id,
-    name: r.name,
-    track: r.track,
-    race_number: r.race_number,
-    race_time: r.time,
-    distance: r.distance,
-    race_class: r.class,
-    odds_as_of: r.odds_as_of || null,
-    odds_snapshot_favourite: (() => { const a=runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((x,y)=>Number(x.odds)-Number(y.odds)||Number(x.number)-Number(y.number)); return a[0] ? {number:a[0].number,name:a[0].name,win_odds:a[0].odds,captured_at:r.odds_as_of||Date.now()} : null; })(),
-    status: 'open',
-    runners,
-    result_1st:null, result_2nd:null, result_3rd:null,
-    win_div:null, place_div:null, favourite_number:null
+  const runners=(r.runners||[]).map(x=>({...x}));
+  if (!runners.length) { showToast('No acceptance runners are available for this race','warn'); return; }
+  const newRace={
+    id:'race_'+Date.now()+'_'+Math.random().toString(36).slice(2,7), api_id:r.provider_id || null,
+    event_id:state.currentEvent.id, name:r.name, track:r.track, race_number:r.race_number,
+    race_time:r.time, distance:r.distance, race_class:r.class, odds_as_of:null,
+    odds_snapshot_favourite:null, status:'open', runners,
+    result_1st:null,result_2nd:null,result_3rd:null,win_div:null,place_div:null,favourite_number:null
   };
-
-  if (db) {
-    const { data: savedRace, error: raceError } = await db.from('races').insert({
-      event_id: state.currentEvent.id,
-      api_id: String(newRace.api_id), distance: newRace.distance || null, race_class: newRace.race_class || null,
-      odds_as_of: newRace.odds_as_of, odds_snapshot_favourite: newRace.odds_snapshot_favourite,
-      name: newRace.name,
-      track: newRace.track,
-      race_number: newRace.race_number,
-      race_time: newRace.race_time,
-      status: 'open'
-    }).select().single();
-    if (raceError) { showToast('Could not save race: ' + raceError.message, 'danger'); return; }
-
-    newRace.id = savedRace.id;
-    const runnerRows = runners.map(x => ({
-      race_id: savedRace.id,
-      place_odds: x.place_odds == null ? null : Number(x.place_odds),
-      jockey: x.jockey, trainer: x.trainer, barrier: x.barrier, form: x.form, emergency: x.emergency,
-      number: Number(x.number),
-      name: x.name,
-      odds: x.odds == null ? null : Number(x.odds),
-      scratched: Boolean(x.scratched)
-    }));
-    if (runnerRows.length) {
-      const { error: runnerError } = await db.from('runners').insert(runnerRows);
-      if (runnerError) {
-        await db.from('races').delete().eq('id', savedRace.id);
-        showToast('Could not save runners: ' + runnerError.message, 'danger');
-        return;
-      }
-    }
-  }
-
+  const {data:savedRace,error:raceError}=await db.from('races').insert({
+    event_id:newRace.event_id,api_id:newRace.api_id,distance:newRace.distance||null,race_class:newRace.race_class||null,
+    odds_as_of:null,odds_snapshot_favourite:null,name:newRace.name,track:newRace.track,
+    race_number:newRace.race_number,race_time:newRace.race_time,status:'open'
+  }).select().single();
+  if (raceError) { showToast('Could not save race: '+raceError.message,'danger'); return; }
+  newRace.id=savedRace.id;
+  const runnerRows=runners.map(x=>({
+    race_id:savedRace.id,number:Number(x.number),name:x.name,odds:null,place_odds:null,
+    scratched:Boolean(x.scratched),jockey:x.jockey||'',trainer:x.trainer||'',barrier:x.barrier,
+    form:x.form||'',emergency:Boolean(x.emergency),runner_ref:x.runner_ref||null,scratching:x.scratching||null
+  })).filter(x=>Number.isFinite(x.number));
+  const {error:runnerError}=await db.from('runners').insert(runnerRows);
+  if (runnerError) { await db.from('races').delete().eq('id',savedRace.id); showToast('Could not save runners: '+runnerError.message,'danger'); return; }
   state.races.push(newRace);
-  showToast('R' + r.race_number + ' ' + r.track + ' added', 'success');
-  renderAdminRaceList();
-  renderRaces();
+  showToast('R'+r.race_number+' '+r.track+' added from PuntersEdge acceptances','success');
+  renderAdminRaceList(); renderRaces();
+}
+
+function normaliseRaceVenue(v) { return String(v||'').toLowerCase().replace(/[^a-z0-9]/g,''); }
+function aetRaceDate(v) {
+  const d=new Date(v); if (Number.isNaN(d.getTime())) return '';
+  const p=new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Sydney',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);
+  return p.find(x=>x.type==='year').value+'-'+p.find(x=>x.type==='month').value+'-'+p.find(x=>x.type==='day').value;
+}
+function puntersEdgeRaceRunners(liveRace) {
+  const active=(liveRace.runners||[]).map(x=>{
+    const sb=(x.bookmakers||[]).find(b=>String(b.key||'').toLowerCase()==='sportsbet');
+    return {number:x.number??x.runner_number,name:x.name||x.runner_name||'Runner',jockey:x.jockey||'',trainer:x.trainer||'',
+      barrier:x.barrier??null,scratched:false,odds:sb?.win_price??null,place_odds:sb?.place_price??null,
+      form:x.form||'',emergency:Boolean(x.emergency),runner_ref:x.runner_ref||null,selection_id:null,scratching:null};
+  });
+  const scratched=(liveRace.scratchings||[]).map(x=>({number:x.number??x.runner_number,name:x.name||x.runner_name||'Runner',
+    jockey:x.jockey||'',trainer:x.trainer||'',barrier:x.barrier??null,scratched:true,odds:null,place_odds:null,
+    form:x.form||'',emergency:Boolean(x.emergency),runner_ref:x.runner_ref||null,selection_id:null,scratching:x}));
+  return [...active,...scratched].filter(x=>Number.isFinite(Number(x.number))).sort((a,b)=>Number(a.number)-Number(b.number));
 }
 
 async function refreshSportsbetRace(raceId) {
-  const savedRace = state.races.find(x => String(x.id) === String(raceId));
-  const race = savedRace ? {...savedRace} : null;
-  if (!race?.api_id) { showToast('No provider race ID for this race', 'warn'); return; }
+  const savedRace=state.races.find(x=>String(x.id)===String(raceId));
+  const race=savedRace?{...savedRace}:null;
+  if (!race) return;
   try {
-    const res = await fetch('/.netlify/functions/odds-api-net?action=race_odds&event_id=' + encodeURIComponent(race.api_id));
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.error || 'Sportsbet refresh failed');
-    const sportsbet = (payload.items || []).find(x => String(x.bookmaker_name || '').toLowerCase() === 'sportsbet');
-    if (!sportsbet?.runners?.length) throw new Error('Sportsbet prices are not available yet');
-    race.runners = sportsbet.runners.map(x => ({
-      number:x.runner_number, name:x.runner_name || 'Runner', jockey:x.jockey_name || '', trainer:x.trainer_name || '',
-      scratched:Boolean(x.is_scratched || x.runner_status === 'SCRATCHED'), odds:x.win_odds ?? null,
-      place_odds:x.place_odds ?? null, selection_id:x.selection_id || null
-    }));
-    race.odds_as_of = payload.as_of_ts_ms || Date.now();
-    const active = race.runners.filter(x=>!x.scratched && Number(x.odds)>0).sort((a,b)=>Number(a.odds)-Number(b.odds)||Number(a.number)-Number(b.number));
-    race.odds_snapshot_favourite = active[0] ? {number:active[0].number,name:active[0].name,win_odds:active[0].odds,captured_at:race.odds_as_of} : null;
-    // Only call this the pre-race favourite when refreshed within 10 minutes of the advertised jump.
-    const jump = new Date(race.race_time).getTime();
-    if (active[0] && race.odds_as_of <= jump && (jump - race.odds_as_of) <= 10*60*1000) {
-      race.pre_race_favourite = {...race.odds_snapshot_favourite};
-      race.favourite_number = active[0].number;
+    const res=await fetch('/.netlify/functions/puntersedge?action=next_to_go&num_races=200&categories=horse&bookmakers=sportsbet&include_unresolved=true');
+    const payload=await res.json();
+    if (!res.ok) throw new Error(payload.detail||payload.error||'PuntersEdge Sportsbet refresh failed');
+    const liveRaces=Array.isArray(payload)?payload:(payload.races||[]);
+    let live=race.api_id ? liveRaces.find(x=>String(x.race_id||x.id)===String(race.api_id)) : null;
+
+    if (!live) {
+      const refs=new Set((race.runners||[]).map(x=>String(x.runner_ref||'')).filter(Boolean));
+      if (refs.size) {
+        const byRefs=liveRaces.filter(x=>[...(x.runners||[]),...(x.scratchings||[])].some(rr=>refs.has(String(rr.runner_ref||''))));
+        if (byRefs.length===1) live=byRefs[0];
+      }
     }
-    if (!db) throw new Error('Database unavailable. Refreshed prices were not saved.');
-    const { error: runnerError } = await db.from('runners').upsert(race.runners.map(r => ({...r, race_id:race.id})), {onConflict:'race_id,number'});
+    if (!live) {
+      const targetDate=aetRaceDate(race.race_time);
+      const byVenue=liveRaces.filter(x=>normaliseRaceVenue(x.venue)===normaliseRaceVenue(race.track)
+        && Number(x.race_number)===Number(race.race_number)
+        && (!x.start_time || !targetDate || aetRaceDate(x.start_time)===targetDate));
+      if (byVenue.length===1) live=byVenue[0];
+    }
+    if (!live) throw new Error('This race is not in the current PuntersEdge priced window yet. Try Odds again once Sportsbet has opened the market.');
+
+    const mapped=puntersEdgeRaceRunners(live);
+    const priced=mapped.filter(x=>!x.scratched && Number(x.odds)>0);
+    if (!priced.length) throw new Error('Sportsbet prices are not available for this race yet');
+    race.api_id=String(live.race_id||live.id);
+    race.runners=mapped;
+    race.odds_as_of=Date.now();
+    const active=priced.sort((a,b)=>Number(a.odds)-Number(b.odds)||Number(a.number)-Number(b.number));
+    race.odds_snapshot_favourite=active[0]?{number:active[0].number,name:active[0].name,win_odds:active[0].odds,captured_at:race.odds_as_of}:null;
+    const jump=new Date(race.race_time).getTime();
+    if (active[0] && race.odds_as_of<=jump && (jump-race.odds_as_of)<=10*60*1000) {
+      race.pre_race_favourite={...race.odds_snapshot_favourite}; race.favourite_number=active[0].number;
+    }
+    const runnerRows=mapped.map(r=>({race_id:race.id,number:Number(r.number),name:r.name,odds:r.odds==null?null:Number(r.odds),
+      place_odds:r.place_odds==null?null:Number(r.place_odds),scratched:Boolean(r.scratched),jockey:r.jockey,trainer:r.trainer,
+      barrier:r.barrier,form:r.form,emergency:r.emergency,runner_ref:r.runner_ref,selection_id:r.selection_id,scratching:r.scratching}));
+    const {error:runnerError}=await db.from('runners').upsert(runnerRows,{onConflict:'race_id,number'});
     if (runnerError) throw runnerError;
-    const { error: raceError } = await db.from('races').update({odds_as_of:race.odds_as_of,
-      odds_snapshot_favourite:race.odds_snapshot_favourite, pre_race_favourite:race.pre_race_favourite || null,
-      favourite_number:race.favourite_number || null}).eq('id', race.id).select().single();
+    const {error:raceError}=await db.from('races').update({api_id:race.api_id,odds_as_of:race.odds_as_of,
+      odds_snapshot_favourite:race.odds_snapshot_favourite,pre_race_favourite:race.pre_race_favourite||null,
+      favourite_number:race.favourite_number||null}).eq('id',race.id).select().single();
     if (raceError) throw raceError;
-    Object.assign(savedRace, race);
-    renderAdminRaceList(); renderRaces();
-    showToast('Sportsbet field and prices refreshed', 'success');
-  } catch(e) { showToast(e.message, 'warn'); }
+    Object.assign(savedRace,race); renderAdminRaceList(); renderRaces();
+    showToast('Sportsbet field and prices refreshed via PuntersEdge','success');
+  } catch(e) { showToast(e.message,'warn'); }
 }
 
 async function addRaceToEvent(apiId, name, track) {
