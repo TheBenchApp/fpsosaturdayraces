@@ -3022,7 +3022,8 @@ function renderSettleList() {
     const capturedFav = race.pre_race_favourite?.number || race.odds_snapshot_favourite?.number || race.favourite_number || '';
     return `
     <div class="card" style="margin-bottom:12px;">
-      <div style="font-family:'Press Start 2P',monospace; font-size:18px; color:var(--gold); margin-bottom:12px;">${race.track} — R${race.race_number} — ${race.name || 'Race '+race.race_number}</div>
+      <div style="font-family:'Press Start 2P',monospace; font-size:18px; color:var(--gold); margin-bottom:6px;">${race.track} — R${race.race_number} — ${race.name || 'Race '+race.race_number}</div>
+      <div style="margin-bottom:10px; font-size:12px; color:var(--green-light);"><strong>Jump:</strong> ${perthTime(race.race_time)}</div>
       <div style="margin-bottom:10px; font-size:12px; color:var(--text-dim);"><strong>Runners:</strong> ${(race.runners||[]).map(r => `#${r.number} ${r.name}`).join(' · ')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
         <button class="btn btn-outline btn-sm" onclick="fetchFinalResult('${race.id}')">↻ Fetch Final Result</button>
