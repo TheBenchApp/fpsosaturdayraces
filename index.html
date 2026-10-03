@@ -467,6 +467,9 @@
     );
   }
 
+  .lane-cash-trail { position:absolute; left:8px; top:50%; transform:translateY(-50%); height:20px; overflow:hidden; white-space:nowrap; font-size:11px; line-height:20px; opacity:.48; letter-spacing:5px; pointer-events:none; }
+  .lane-leader-fire { position:absolute; top:50%; transform:translate(-100%,-50%); font-size:15px; filter:drop-shadow(0 0 5px rgba(255,120,0,.55)); pointer-events:none; }
+
   .lane-horse {
     position: absolute;
     top: 50%;
@@ -2162,13 +2165,18 @@ function renderTracker() {
   container.innerHTML = scores.map((p, i) => {
     const pct = Math.max(2, (p.total / maxScore) * 88);
     const horseEmoji = '🐎';
+    const bagCount = p.total > 0 ? Math.max(1, Math.min(14, Math.round((pct / 88) * 14))) : 0;
+    const cashTrail = bagCount ? Array(bagCount).fill('💰').join(' ') : '';
+    const isLeader = i === 0 && p.total > 0;
     return `
       <div class="track-lane">
         <div class="lane-name" title="${escapeHtml(p.name)}">${escapeHtml(p.name.split(' ')[0])}</div>
         <div class="lane-track">
+          <div class="lane-cash-trail" style="width:calc(${pct}% - 10px);">${cashTrail}</div>
+          ${isLeader ? `<div class="lane-leader-fire" style="left:${pct}%;">🔥</div>` : ''}
           <div class="lane-horse" style="left:${pct}%; color:${p.colour}; text-shadow: 0 0 8px ${p.colour}80;">${horseEmoji}</div>
         </div>
-        <div class="lane-score">$${p.total.toFixed(2)}</div>
+        <div class="lane-score">${p.total.toFixed(2)}</div>
       </div>
     `;
   }).join('');
@@ -3061,35 +3069,20 @@ async function fetchFinalResult(raceId) {
     const p2 = placings.find(x => Number(x.position) === 2) || placings[1];
     const p3 = placings.find(x => Number(x.position) === 3) || placings[2];
     if (!p1 || !p2) throw new Error('Final result has incomplete placings');
-    const straight = Array.isArray(result.dividends?.straight) ? result.dividends.straight : [];
-    const dividend = (placing, market) => {
-      if (!placing) return '';
-      const rows = straight.filter(d => Number(d.number) === Number(placing.number) && String(d.market || '').toUpperCase() === market);
-      const sportsbet = rows.find(d => String(d.bookmaker || d.bookmaker_key || d.source || '').toLowerCase() === 'sportsbet');
-      const declared = sportsbet || rows.find(d => String(d.product || '').toUpperCase() === 'FIXED') || rows[0];
-      return Number.isFinite(Number(declared?.amount)) ? Number(declared.amount) : '';
-    };
     document.getElementById('pos1-'+raceId).value = p1.number ?? '';
-    document.getElementById('windiv-'+raceId).value = dividend(p1,'WIN');
-    document.getElementById('place1-'+raceId).value = dividend(p1,'PLACE');
     document.getElementById('pos2-'+raceId).value = p2.number ?? '';
-    document.getElementById('place2-'+raceId).value = dividend(p2,'PLACE');
     document.getElementById('pos3-'+raceId).value = p3?.number ?? '';
-    document.getElementById('place3-'+raceId).value = dividend(p3,'PLACE');
-    const missing = [
-      ['1st WIN',document.getElementById('windiv-'+raceId).value],
-      ['1st PLACE',document.getElementById('place1-'+raceId).value],
-      ['2nd PLACE',document.getElementById('place2-'+raceId).value],
-      ...(p3 ? [['3rd PLACE',document.getElementById('place3-'+raceId).value]] : [])
-    ].filter(([,v]) => v === '').map(([label]) => label);
-    status.textContent = missing.length ? '✓ FINAL placings loaded — enter missing Sportsbet dividends manually: ' + missing.join(', ') : '✓ FINAL result + declared dividends loaded — check then settle.';
-    showToast(missing.length ? 'Final placings loaded; some dividends need manual entry' : 'Final result and declared dividends loaded', missing.length ? 'warn' : 'success');
+    document.getElementById('windiv-'+raceId).value = '';
+    document.getElementById('place1-'+raceId).value = '';
+    document.getElementById('place2-'+raceId).value = '';
+    document.getElementById('place3-'+raceId).value = '';
+    status.textContent = '✓ FINAL placings loaded — enter Sportsbet dividends manually.';
+    showToast('Final placings loaded — enter Sportsbet dividends', 'success');
   } catch (error) {
     status.textContent = 'Could not load result.';
     showToast('Could not fetch final result: ' + error.message, 'danger');
   }
 }
-
 async function settleRace(raceId) {
   const race = state.races.find(r => r.id === raceId);
   if (!race) return;
