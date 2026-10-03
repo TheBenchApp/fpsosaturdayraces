@@ -1934,19 +1934,34 @@ function renderRaces() {
           </div>
         </div>
         <div class="race-body">
-          ${settled && race.result_1st ? `
-            <div style="background:rgba(201,168,76,0.1); border:1px solid var(--gold); border-radius:6px; padding:10px 14px; margin-bottom:10px; font-size:13px;">
-              <strong style="color:var(--gold);">Result:</strong>
-              1st #${race.result_1st} · 2nd #${race.result_2nd} · 3rd #${race.result_3rd || '-'}
-              &nbsp;|&nbsp; Win: $${Number(race.win_div || 0).toFixed(2)} · Place: $${Number(race.place_div || 0).toFixed(2)}
-              ${race.favourite_number ? `· Fav: #${race.favourite_number}` : ''}
-            </div>
-          ` : ''}
+          ${settled && race.result_1st ? (() => {
+            const podium = [
+              { medal:'🥇', number:race.result_1st, payout:`WIN ${Number(race.win_div || 0).toFixed(2)} · PLACE ${Number(race.place_div || 0).toFixed(2)}` },
+              { medal:'🥈', number:race.result_2nd, payout:`PLACE ${Number(race.place_div_2nd || 0).toFixed(2)}` },
+              { medal:'🥉', number:race.result_3rd, payout:Number(race.place_div_3rd || 0) > 0 ? `PLACE ${Number(race.place_div_3rd).toFixed(2)}` : 'No Place Dividend' }
+            ].filter(p => p.number);
+            return `
+              <div class="runner-list">
+                ${podium.map(p => {
+                  const runner = (race.runners || []).find(r => r.number == p.number);
+                  const isFav = race.favourite_number && Number(race.favourite_number) === Number(p.number);
+                  return `
+                    <div class="runner-row">
+                      <div class="runner-number" style="font-size:18px;">${p.medal}</div>
+                      <div class="runner-name">
+                        <div>#${p.number} — ${escapeHtml(runner?.name || 'Runner')} ${isFav ? '<span class="pill pill-gold" style="font-size:8px;margin-left:5px;">⭐ FAV</span>' : ''}</div>
+                      </div>
+                      <div class="runner-odds" style="min-width:145px;text-align:right;font-size:11px;">${p.payout}</div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>`;
+          })() : `
           <div class="runner-list">
             ${(race.runners || []).map(runner => {
               const isSelected = userSelection == runner.number;
               const isScratched = runner.scratched;
-              const canSelect = !isLocked && !isScratched && !settled && state.user;
+              const canSelect = !isLocked && !isScratched && state.user;
               return `
                 <div class="runner-row ${isSelected ? 'selected' : ''} ${isScratched ? 'scratched' : ''}"
                      onclick="${canSelect ? `selectRunner('${race.id}', ${runner.number})` : ''}">
@@ -1963,7 +1978,7 @@ function renderRaces() {
                 </div>
               `;
             }).join('')}
-          </div>
+          </div>`}
           ${userSelection ? `
             <div style="margin-top:10px; font-size:12px; color:var(--gold); text-align:right;">
               Your pick: #${userSelection} — ${(race.runners || []).find(r => r.number == userSelection)?.name || 'Unknown'}
