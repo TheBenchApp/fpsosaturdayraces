@@ -3316,10 +3316,59 @@ function exportPaidList() {
   a.href = url; a.download = 'raceday-paid-list.txt'; a.click();
 }
 
-function renderHistory() {
+async function renderHistory() {
   const container = document.getElementById('history-list');
-  container.innerHTML = '<div class="text-dim text-sm">Past events will appear here once archived.</div>';
-  // In full DB version: query events where status = 'archived'
+  if (!container) return;
+  if (!db) { container.innerHTML = '<div class="text-dim text-sm">History is unavailable while the database is disconnected.</div>'; return; }
+  container.innerHTML = '<div class="text-dim text-sm">Loading archived events…</div>';
+  try {
+    const { data: events, error } = await db.from('events')
+      .select('id,name,status,lockout_time,created_at')
+      .eq('status','archived')
+      .order('lockout_time',{ascending:false});
+    if (error) throw error;
+    if (!events?.length) {
+      container.innerHTML = '<div class="text-dim text-sm">No archived events yet.</div>';
+      return;
+    }
+    const cards = await Promise.all(events.map(async event => {
+      const [racesRes, participantsRes, selectionsRes] = await Promise.all([
+        db.from('races').select('id,status,result_1st').eq('event_id',event.id),
+        db.from('participants').select('id,name,colour').eq('event_id',event.id),
+        db.from('selections').select('participant_id,race_id,runner_number').eq('event_id',event.id)
+      ]);
+      if (racesRes.error) throw racesRes.error;
+      if (participantsRes.error) throw participantsRes.error;
+      if (selectionsRes.error) throw selectionsRes.error;
+      const races = racesRes.data || [], participants = participantsRes.data || [], selections = selectionsRes.data || [];
+      const selectionCounts = new Map();
+      selections.forEach(s => selectionCounts.set(String(s.participant_id),(selectionCounts.get(String(s.participant_id)) || 0) + 1));
+      const completeEntries = races.length
+        ? participants.filter(p => (selectionCounts.get(String(p.id)) || 0) >= races.length).length
+        : 0;
+      const settled = races.filter(r => r.result_1st != null || String(r.status || '').toLowerCase() === 'settled').length;
+      return {event,raceCount:races.length,participantCount:participants.length,completeEntries,settled};
+    }));
+    container.innerHTML = cards.map(x => `
+      <div class="card" style="margin:0 0 12px;padding:14px;">
+        <div class="flex-between" style="gap:12px;align-items:flex-start;">
+          <div>
+            <div style="font-size:16px;font-weight:700;">${escapeHtml(x.event.name || 'Archived event')}</div>
+            <div class="text-xs text-dim" style="margin-top:5px;">Lockout: ${escapeHtml(formatPerthDateTime(x.event.lockout_time))}</div>
+          </div>
+          <span class="pill pill-grey">ARCHIVED</span>
+        </div>
+        <div class="text-sm" style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;">
+          <span>🏇 ${x.raceCount} races</span>
+          <span>👥 ${x.participantCount} participants</span>
+          <span>✓ ${x.completeEntries} complete entries</span>
+          <span>🏁 ${x.settled}/${x.raceCount} settled</span>
+        </div>
+      </div>`).join('');
+  } catch (error) {
+    console.error('History load failed:',error);
+    container.innerHTML = '<div class="alert alert-danger">Could not load event history: '+escapeHtml(String(error?.message || error))+'</div>';
+  }
 }
 
 function generateQR() {
