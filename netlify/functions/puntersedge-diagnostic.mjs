@@ -35,8 +35,16 @@ export default async (request) => {
     const acc = acceptances.body || {};
     const meetings = Array.isArray(acc.meetings) ? acc.meetings : [];
     const accRaces = meetings.flatMap(m => Array.isArray(m.races) ? m.races.map(r=>({...r,_venue:m.venue})) : []);
+    const accRunnerRows = accRaces.flatMap(r => Array.isArray(r.runners) ? r.runners.map(x=>({...x,_race_id:r.race_id,_venue:r._venue,_race_number:r.race_number})) : []);
     const eventRows = Array.isArray(events.body) ? events.body : (Array.isArray(events.body?.races) ? events.body.races : []);
     const priceRows = Array.isArray(prices.body) ? prices.body : (Array.isArray(prices.body?.races) ? prices.body.races : []);
+
+    const liveByRaceId = new Map(priceRows.filter(r=>r.race_id).map(r=>[String(r.race_id),r]));
+    const acceptanceRaceIds = accRaces.map(r=>String(r.race_id || "")).filter(Boolean);
+    const matchedRaceIds = acceptanceRaceIds.filter(id=>liveByRaceId.has(id));
+    const acceptanceRunnerRefs = new Set(accRunnerRows.map(r=>String(r.runner_ref || "")).filter(Boolean));
+    const liveRunnerRefs = new Set(priceRows.flatMap(r=>r.runners || []).map(r=>String(r.runner_ref || "")).filter(Boolean));
+    const matchedRunnerRefs = [...acceptanceRunnerRefs].filter(ref=>liveRunnerRefs.has(ref));
 
     let sportsbetRaces=0, runners=0, win=0, place=0, both=0;
     for (const race of priceRows) {
@@ -61,8 +69,10 @@ export default async (request) => {
       ["Acceptances HTTP", acceptances.status],
       ["Acceptance date/status", [acc.date,acc.date_status].filter(Boolean).join(" / ") || "—"],
       ["Acceptance meetings", acc.meeting_count ?? meetings.length],
-      ["Acceptance races", acc.race_count ?? accRaces.length],
-      ["Acceptance runners", acc.runner_count ?? "—"],
+      ["Acceptance races (API top-level)", acc.race_count ?? "—"],
+      ["Acceptance races parsed", accRaces.length],
+      ["Acceptance runners (API top-level)", acc.runner_count ?? "—"],
+      ["Acceptance runners parsed", accRunnerRows.length],
       ["Meetings", meetingNames.join(", ") || "—"],
       ["Events HTTP", events.status],
       ["Events returned", eventRows.length],
@@ -73,7 +83,12 @@ export default async (request) => {
       ["Runner rows checked", runners],
       ["Sportsbet WIN prices", win],
       ["Sportsbet PLACE prices", place],
-      ["Sportsbet WIN + PLACE", both]
+      ["Sportsbet WIN + PLACE", both],
+      ["Acceptance race IDs present", acceptanceRaceIds.length],
+      ["Acceptance race IDs already in live prices", matchedRaceIds.length],
+      ["Acceptance runner_refs present", acceptanceRunnerRefs.size],
+      ["Acceptance runner_refs already in live prices", matchedRunnerRefs.length],
+      ["Identity strategy", "Store acceptances race_id; join later prices by exact race_id (runner_ref available for runner reconciliation)"]
     ];
 
     const errorText = obj => obj.status >= 400 ? htmlEscape(JSON.stringify(obj.body).slice(0,1000)) : "—";
