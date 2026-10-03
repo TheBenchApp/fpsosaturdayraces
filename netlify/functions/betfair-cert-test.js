@@ -35,11 +35,18 @@ exports.handler=async event=>{
   const app=process.env.BETFAIR_APP_KEY;const loginBody=new URLSearchParams({username:process.env.BETFAIR_USERNAME,password:process.env.BETFAIR_PASSWORD}).toString();
   const login=await post("identitysso-cert.betfair.com.au","/api/certlogin",{"X-Application":app,"Content-Type":"application/x-www-form-urlencoded"},loginBody,process.env.BETFAIR_CLIENT_CERT,process.env.BETFAIR_CLIENT_KEY);
   let lj={};try{lj=JSON.parse(login.body)}catch{};if(login.status!==200||lj.loginStatus!=="SUCCESS"||!lj.sessionToken)return reply(502,{ok:false,status:"BETFAIR_LOGIN_FAILED",http_status:login.status,login_status:lj.loginStatus||null,auto_generate_enabled:false});
-  const token=lj.sessionToken;\n  // Perth is UTC+8 year-round: a Perth calendar day begins 16:00Z on the previous UTC date.\n  const perthStart=new Date(date+"T00:00:00+08:00");\n  const perthEnd=new Date(perthStart.getTime()+24*60*60*1000-1);\n  const from=perthStart.toISOString(),to=perthEnd.toISOString();
+  const token=lj.sessionToken;
+  // Perth is UTC+8 year-round: a Perth calendar day begins 16:00Z on the previous UTC date.
+  const perthStart=new Date(date+"T00:00:00+08:00");
+  const perthEnd=new Date(perthStart.getTime()+24*60*60*1000-1);
+  const from=perthStart.toISOString(),to=perthEnd.toISOString();
   const events=await betfair("/listEvents/",{filter:{eventTypeIds:["7"],marketCountries:["AU"],marketStartTime:{from,to}}},app,token);
   const ids=events.map(x=>x.event?.id).filter(Boolean);
   const catalogue=ids.length?await betfair("/listMarketCatalogue/",{filter:{eventTypeIds:["7"],eventIds:ids,marketCountries:["AU"],marketTypeCodes:["WIN"]},marketProjection:["EVENT","MARKET_DESCRIPTION","RUNNER_DESCRIPTION","RUNNER_METADATA","MARKET_START_TIME"],sort:"FIRST_TO_START",maxResults:"1000"},app,token):[];
   const meetings=normalize(catalogue).map(m=>({...m,validation:validate(m)}));const bad=meetings.filter(m=>!m.validation.ok);
-  const eventIds=new Set(ids.map(String)); const returnedEventIds=new Set(meetings.map(m=>String(m.betfair_event_id))); const missingEvents=[...eventIds].filter(id=>!returnedEventIds.has(id));\n  const wholeErrors=[...bad.flatMap(m=>m.validation.errors.map(e=>m.venue+":"+e)),...missingEvents.map(id=>"event_"+id+":no_WIN_markets")];\n  const valid=wholeErrors.length===0 && meetings.length===events.length;\n  return reply(valid?200:422,{ok:valid,status:valid?"BETFAIR_CARD_VALID":"AU CARD INCOMPLETE",date,event_count:events.length,meeting_count:meetings.length,race_count:meetings.reduce((n,m)=>n+m.races.length,0),auto_generate_enabled:false,diagnostics:{errors:wholeErrors,missing_event_ids:missingEvents},meetings,note:"Diagnostic branch only; production Auto Generate remains disabled."});
+  const eventIds=new Set(ids.map(String)); const returnedEventIds=new Set(meetings.map(m=>String(m.betfair_event_id))); const missingEvents=[...eventIds].filter(id=>!returnedEventIds.has(id));
+  const wholeErrors=[...bad.flatMap(m=>m.validation.errors.map(e=>m.venue+":"+e)),...missingEvents.map(id=>"event_"+id+":no_WIN_markets")];
+  const valid=wholeErrors.length===0 && meetings.length===events.length;
+  return reply(valid?200:422,{ok:valid,status:valid?"BETFAIR_CARD_VALID":"AU CARD INCOMPLETE",date,event_count:events.length,meeting_count:meetings.length,race_count:meetings.reduce((n,m)=>n+m.races.length,0),auto_generate_enabled:false,diagnostics:{errors:wholeErrors,missing_event_ids:missingEvents},meetings,note:"Diagnostic branch only; production Auto Generate remains disabled."});
  }catch(err){return reply(500,{ok:false,status:"BETFAIR_CARD_ERROR",error:String(err?.message||err),auto_generate_enabled:false})}
 };
