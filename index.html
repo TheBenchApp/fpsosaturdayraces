@@ -1936,9 +1936,9 @@ function renderRaces() {
         <div class="race-body">
           ${settled && race.result_1st ? (() => {
             const podium = [
-              { medal:'🥇', number:race.result_1st, payout:`WIN ${Number(race.win_div || 0).toFixed(2)} · PLACE ${Number(race.place_div || 0).toFixed(2)}` },
-              { medal:'🥈', number:race.result_2nd, payout:`PLACE ${Number(race.place_div_2nd || 0).toFixed(2)}` },
-              { medal:'🥉', number:race.result_3rd, payout:Number(race.place_div_3rd || 0) > 0 ? `PLACE ${Number(race.place_div_3rd).toFixed(2)}` : 'No Place Dividend' }
+              { medal:'🥇', number:race.result_1st, payout:`WIN $${Number(race.win_div || 0).toFixed(2)} · PLACE $${Number(race.place_div || 0).toFixed(2)}` },
+              { medal:'🥈', number:race.result_2nd, payout:`PLACE $${Number(race.place_div_2nd || 0).toFixed(2)}` },
+              { medal:'🥉', number:race.result_3rd, payout:Number(race.place_div_3rd || 0) > 0 ? `PLACE $${Number(race.place_div_3rd).toFixed(2)}` : 'No Place Dividend' }
             ].filter(p => p.number);
             return `
               <div class="runner-list">
