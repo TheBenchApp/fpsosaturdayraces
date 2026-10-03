@@ -1457,41 +1457,82 @@ let refreshingEvent = false;
 async function refreshEventData() {
   if (refreshingEvent) return;
   if (!db) { showToast('Live connection unavailable. Please try again.', 'warn'); return; }
+
   refreshingEvent = true;
   const button = document.getElementById('btn-refresh');
+  const activeSection = document.querySelector('#main-app .section.active')?.id || 'section-races';
+  const activeAdminSection = document.querySelector('#section-admin .admin-section.active')?.id || 'admin-event';
+  const previousEventId = state.currentEvent?.id || null;
+  const previousUser = state.user ? { ...state.user } : null;
+
   button.disabled = true;
   button.textContent = '↻ Refreshing…';
   button.setAttribute('aria-busy', 'true');
-  const previousEventId = state.currentEvent?.id;
+
   try {
     if (!await loadCurrentEvent()) throw new Error('Unable to load event');
-    const eventChanged = previousEventId !== state.currentEvent?.id;
+
+    const eventChanged = previousEventId !== (state.currentEvent?.id || null);
     if (eventChanged) {
-      state.selections = {};
-      state.user = null;
-      localStorage.removeItem('raceday_user');
-      document.getElementById('user-badge').style.display = 'none';
       chatMessages = [];
       setupRealtimeSubs();
-      renderChat();
     }
-    if (state.user) {
-      const participant = state.participants.find(p => String(p.id) === String(state.user.id));
+
+    // Preserve the authenticated account/session. If this is a new event, bind the
+    // permanent account to its participant row when one exists; never log the player out.
+    if (!state.isAdmin && previousUser) {
+      let participant = null;
+      if (state.currentEvent) {
+        participant = previousUser.account_id
+          ? state.participants.find(p => String(p.account_id || '') === String(previousUser.account_id))
+          : state.participants.find(p => String(p.id) === String(previousUser.id));
+      }
+      state.user = participant
+        ? { id:participant.id, account_id:participant.account_id || previousUser.account_id, name:participant.name, colour:participant.colour, event_id:participant.event_id }
+        : { account_id:previousUser.account_id, name:previousUser.name, colour:previousUser.colour };
       state.selections = { ...(participant?.selections || {}) };
-      localStorage.setItem('raceday_selections_' + state.currentEvent.id, JSON.stringify(state.selections));
+      localStorage.setItem('raceday_user', JSON.stringify(state.user));
+      if (state.currentEvent) localStorage.setItem('raceday_selections_' + state.currentEvent.id, JSON.stringify(state.selections));
     }
+
     updateBanner();
     renderRaces();
     renderLeaderboard();
     renderTracker();
+
+    if (state.currentEvent) await loadChatFromDB();
+
     if (state.isAdmin) {
       renderAdminCurrentEvent();
       renderAdminRaceList();
       renderSettleList();
       renderPaidList();
+      renderHistory();
     }
-    if (eventChanged && !state.isAdmin) showLanding();
-    showToast('Event, races, results and saved selections refreshed', 'success');
+
+    // Keep the user exactly where they were rather than navigating or reloading.
+    document.querySelectorAll('#main-app .section').forEach(el => el.classList.remove('active'));
+    const section = document.getElementById(activeSection);
+    if (section) section.classList.add('active');
+    document.querySelectorAll('#main-nav .nav-tab').forEach(el => el.classList.remove('active'));
+    const tabId = activeSection.replace('section-', 'tab-');
+    const tab = document.getElementById(tabId);
+    if (tab) tab.classList.add('active');
+
+    if (activeSection === 'section-admin') {
+      document.querySelectorAll('#section-admin .admin-section').forEach(el => el.classList.remove('active'));
+      const adminSection = document.getElementById(activeAdminSection);
+      if (adminSection) adminSection.classList.add('active');
+      document.querySelectorAll('#section-admin .admin-tab').forEach(el => {
+        const target = 'admin-' + (el.getAttribute('onclick')?.match(/showAdminSection\('([^']+)'\)/)?.[1] || '');
+        el.classList.toggle('active', target === activeAdminSection);
+      });
+    }
+
+    syncStickyHeaderHeight();
+    button.textContent = '✓ Updated';
+    showToast('Updated races, results, selections, leaderboard, tracker and chat', 'success');
+    await new Promise(resolve => setTimeout(resolve, 700));
   } catch (e) {
     console.error('Refresh failed:', e);
     showToast('Refresh failed. Please try again.', 'danger');
