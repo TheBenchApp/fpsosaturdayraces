@@ -122,6 +122,15 @@
   .event-status.open { color: #4caf50; }
   .event-status.locked { color: var(--red); }
 
+  /* ===== FIXED EVENT CONTROLS ===== */
+  .event-controls-fixed {
+    position: sticky;
+    top: 0;
+    z-index: 99;
+    background: var(--dark2);
+    box-shadow: 0 4px 12px rgba(0,0,0,.45);
+  }
+
   /* ===== NAV TABS ===== */
   .nav-tabs {
     display: flex;
@@ -1074,17 +1083,17 @@
     </div>
   </div>
 
-  <!-- Event Banner -->
-  <div class="event-banner">
-    <span class="event-name" id="banner-event-name">Loading event...</span>
-    <span class="event-status" id="banner-event-status"></span>
-  </div>
-
-  <!-- Nav -->
-  <div class="nav-tabs" id="main-nav">
-    <button class="nav-tab active" onclick="showTab('races')" id="tab-races">🏁 Races</button>
-    <button class="nav-tab" onclick="showTab('leaderboard')" id="tab-leaderboard">🏆 Race Day</button>
-    <button class="nav-tab" onclick="showTab('chat')" id="tab-chat">💬 Chat <span id="chat-unread-badge" class="chat-unread-badge" style="display:none;">0</span></button>
+  <!-- Fixed event controls -->
+  <div class="event-controls-fixed">
+    <div class="event-banner">
+      <span class="event-name" id="banner-event-name">Loading event...</span>
+      <span class="event-status" id="banner-event-status"></span>
+    </div>
+    <div class="nav-tabs" id="main-nav">
+      <button class="nav-tab active" onclick="showTab('races')" id="tab-races">🏁 Races</button>
+      <button class="nav-tab" onclick="showTab('leaderboard')" id="tab-leaderboard">🏆 Race Day</button>
+      <button class="nav-tab" onclick="showTab('chat')" id="tab-chat">💬 Chat <span id="chat-unread-badge" class="chat-unread-badge" style="display:none;">0</span></button>
+    </div>
   </div>
 
   <div class="main">
