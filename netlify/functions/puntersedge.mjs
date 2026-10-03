@@ -28,6 +28,9 @@ export default async (request) => {
     const res = await fetch(upstream,{headers:{"X-API-Key":key,"Accept":"application/json"}});
     const body = await res.text();
 
+    // The feeds intentionally serve different phases of the race lifecycle:
+    // acceptances = early official field; events = authoritative race identity/time inside plan horizon;
+    // next-to-go = later bookmaker/Sportsbet prices. Do not treat next-to-go as a future-day card.
     // Acceptances are the authoritative field/runner card, but PuntersEdge documents
     // /racing/events as the authoritative source for advertised start_time.
     // Enrich acceptance races with event times so cards remain usable before markets
