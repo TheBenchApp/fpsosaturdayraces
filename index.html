@@ -2674,17 +2674,18 @@ function meetingTimeZone(meeting, venue) {
   const state=String(meeting?.state||meeting?.region||meeting?.jurisdiction||'').toUpperCase().replace(/[^A-Z]/g,'');
   const states={WA:'Australia/Perth',WESTERNAUSTRALIA:'Australia/Perth',SA:'Australia/Adelaide',SOUTHAUSTRALIA:'Australia/Adelaide',NT:'Australia/Darwin',NORTHERNTERRITORY:'Australia/Darwin',QLD:'Australia/Brisbane',QUEENSLAND:'Australia/Brisbane',NSW:'Australia/Sydney',NEWSOUTHWALES:'Australia/Sydney',ACT:'Australia/Sydney',VIC:'Australia/Melbourne',VICTORIA:'Australia/Melbourne',TAS:'Australia/Hobart',TASMANIA:'Australia/Hobart'};
   if(states[state]) return states[state];
-  const v=String(venue||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  const norm=v=>String(v||'').toLowerCase().replace(/^sportsbet[\s_-]*/,'').replace(/[^a-z0-9]/g,'');
+  const keys=[meeting?.venue_id,meeting?.venue_norm,meeting?.venue_site,meeting?.venue_canonical,meeting?.venue,venue].map(norm).filter(Boolean);
   const groups=[
-    ['Australia/Perth','ascot,belmont,belmontpark,northam,pinjarra,bunbury,geraldton,kalgoorlie,albany,broome,carnarvon'],
-    ['Australia/Adelaide','morphettville,murraybridge,gawler,balaklava,strathalbyn,portlincoln,oakbank,bordertown'],
-    ['Australia/Darwin','darwin,pioneerpark,alicesprings'],
-    ['Australia/Melbourne','flemington,caulfield,sandown,sandownhillside,sandownlakeside,mooneevalley,bendigo,ballarat,geelong,cranbourne,pakenham,mornington,warrnambool,sale,moe'],
-    ['Australia/Sydney','randwick,rosehill,rosehillgardens,canterbury,warwickfarm,newcastle,kembla,kemblagrange,gosford,hawkesbury,grafton,wyong'],
-    ['Australia/Brisbane','eaglefarm,doomben,goldcoast,sunshinecoast,ipswich,toowoomba,townsville,cairns,mackay,rockhampton,bundaberg'],
+    ['Australia/Perth','ascot,belmont,belmontpark,northam,pinjarra,pinjarra/scarps,bunbury,geraldton,kalgoorlie,albany,broome,carnarvon,york,esperance'],
+    ['Australia/Adelaide','morphettville,murraybridge,gawler,balaklava,strathalbyn,portlincoln,oakbank,bordertown,naracoorte,mountgambier,clare'],
+    ['Australia/Darwin','darwin,pioneerpark,alicesprings,katherine,tennantcreek'],
+    ['Australia/Melbourne','flemington,caulfield,sandown,sandownhillside,sandownlakeside,mooneevalley,bendigo,ballarat,geelong,cranbourne,pakenham,mornington,warrnambool,sale,moe,wangaratta,echuca,hamilton,ararat,terang,benalla,seymour'],
+    ['Australia/Sydney','randwick,rosehill,rosehillgardens,canterbury,warwickfarm,newcastle,kembla,kemblagrange,gosford,hawkesbury,grafton,wyong,ballina,cootamundra,mungery,mungerypicnic,dubbo,tamworth,muswellbrook,portmacquarie,coffs harbour,coffsharbour,nowra,orange,bathurst,wagga,waggawagga,albury'],
+    ['Australia/Brisbane','eaglefarm,doomben,goldcoast,sunshinecoast,ipswich,toowoomba,townsville,cairns,mackay,rockhampton,bundaberg,charleville,warwick,dalby,gatton,beaudesert'],
     ['Australia/Hobart','hobart,launceston,devonport']
   ];
-  for(const [zone,list] of groups) if(list.split(',').includes(v)) return zone;
+  for(const key of keys) for(const [zone,list] of groups) if(list.split(',').map(norm).includes(key)) return zone;
   return null;
 }
 function zonedLocalToISO(date,hour,minute,timeZone) {
@@ -2699,11 +2700,14 @@ function zonedLocalToISO(date,hour,minute,timeZone) {
   return new Date(guess).toISOString();
 }
 function acceptanceTimeISO(date,localTime,meeting,venue) {
-  const m=String(localTime||'').trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if(!date||!m) return null;
-  let h=Number(m[1])%12;if(m[3].toUpperCase()==='PM')h+=12;
+  const raw=String(localTime||'').trim();
+  if(!date||!raw) return null;
+  let h,min;
+  let m=raw.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if(m){h=Number(m[1])%12;if(m[3].toUpperCase()==='PM')h+=12;min=Number(m[2]);}
+  else {m=raw.match(/^(\d{1,2}):(\d{2})$/);if(!m)return null;h=Number(m[1]);min=Number(m[2]);if(h>23)return null;}
   const zone=meetingTimeZone(meeting,venue); if(!zone)return null;
-  try{return zonedLocalToISO(date,h,Number(m[2]),zone);}catch{return null;}
+  try{return zonedLocalToISO(date,h,min,zone);}catch{return null;}
 }
 function perthTime(iso) {
   if (!iso || Number.isNaN(new Date(iso).getTime())) return 'TBC';
@@ -2765,6 +2769,7 @@ async function loadRaceCard() {
     const payload=await res.json();
     if (!res.ok) throw new Error(payload.detail || payload.error || 'PuntersEdge acceptances request failed');
     const meetings=Array.isArray(payload.meetings) ? payload.meetings : [];
+    const pendingMeetings=meetings.filter(m=>m.acceptances_published===false || !(m.races||[]).length);
     loadedRacingCard=meetings.flatMap(m=>(m.races||[]).map(r=>{
       const venue=m.venue || r.venue || 'Unknown track';
       const feature=featureRaceMeta(date,venue,r.race_number);
@@ -2790,6 +2795,10 @@ async function loadRaceCard() {
     if (!loadedRacingCard.length) throw new Error('PuntersEdge returned no timed Australian thoroughbred races for '+date+'.');
     document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10?'inline-flex':'none';
     clearGeneratedCard();
+    if (pendingMeetings.length) {
+      const names=pendingMeetings.map(m=>m.venue_canonical||m.venue||m.venue_norm||'Unknown meeting');
+      container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Acceptances pending:</strong> '+escapeHtml(names.join(', '))+'. PuntersEdge has discovered these meetings but Racing Australia acceptance rows are not published in this feed yet. Reload AU Card later to pick them up.</div>');
+    }
   } catch(e) { container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>'; }
 }
 function titleCase(v) { return String(v || '').replace(/\b\w/g, c => c.toUpperCase()); }
