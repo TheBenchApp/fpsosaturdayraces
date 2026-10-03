@@ -1,0 +1,19 @@
+name: Isolated Sportsbet extractor tests
+on:
+  push:
+    branches: [test-sportsbet-card-extractor]
+    paths:
+      - "test/sportsbet-extractor/**"
+      - ".github/workflows/sportsbet-extractor-test.yml"
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node test/sportsbet-extractor/sportsbet-card-extractor.test.mjs
+      - run: node test/sportsbet-extractor/live-sportsbet-probe.mjs

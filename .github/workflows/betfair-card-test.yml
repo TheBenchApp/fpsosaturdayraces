@@ -1,0 +1,26 @@
+name: Isolated Betfair card tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "test/betfair-card/**"
+      - ".github/workflows/betfair-card-test.yml"
+  push:
+    branches: [test-sportsbet-card-extractor]
+    paths:
+      - "test/betfair-card/**"
+      - ".github/workflows/betfair-card-test.yml"
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Betfair card normalisation and fail-closed validation
+        run: node test/betfair-card/betfair-card.test.mjs
+      - name: Auto Generate 10 selection
+        run: node test/betfair-card/auto-generate-10.test.mjs

@@ -1222,7 +1222,7 @@
               <input type="date" id="race-date-input">
               <button class="btn btn-primary btn-sm" onclick="loadRaceCard()">Load AU Card</button>
             </div>
-            <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds via PuntersEdge · Sportsbet prices · all times shown in Perth (AWST).</div>
+            <div class="text-xs text-dim" style="margin-top:7px;">Australian thoroughbreds via Sportsbet · PuntersEdge cross-check · all times shown in Perth (AWST).</div>
           </div>
           <div class="form-group">
             <label>Filter loaded card</label>
@@ -2758,39 +2758,53 @@ async function loadRaceCard() {
   const input=document.getElementById('race-date-input');
   if (!input.value) input.value=nextSaturdayISO();
   const date=input.value, container=document.getElementById('race-search-results');
+  const autoBtn=document.getElementById('auto-card-btn');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { container.innerHTML='<div class="alert alert-warn">Choose a valid race date.</div>'; return; }
-  container.innerHTML='<div class="text-dim text-sm">Loading Australian thoroughbred acceptances for '+escapeHtml(formatPerthDate(date))+'…</div>';
+  autoBtn.style.display='none';
+  loadedRacingCard=[];
+  container.innerHTML='<div class="text-dim text-sm">Loading Sportsbet Australian thoroughbred card for '+escapeHtml(formatPerthDate(date))+'…</div>';
   try {
-    const res=await fetch('/.netlify/functions/puntersedge?action=acceptances&date='+encodeURIComponent(date));
+    const endpoint=SUPABASE_URL+'/functions/v1/sportsbet-card?forceFunctionRegion=ap-southeast-2&date='+encodeURIComponent(date);
+    const res=await fetch(endpoint,{headers:{'apikey':SUPABASE_ANON_KEY,'Authorization':'Bearer '+SUPABASE_ANON_KEY}});
     const payload=await res.json();
-    if (!res.ok) throw new Error(payload.detail || payload.error || 'PuntersEdge acceptances request failed');
-    const meetings=Array.isArray(payload.meetings) ? payload.meetings : [];
+    if (!res.ok || !payload.ok || payload.status!=='OK' || payload.auto_generate_enabled!==true) {
+      const detail=payload?.diagnostics?.invalid_meetings?.map(x=>x.venue+': '+(x.errors||[]).join(', ')).join(' | ');
+      throw new Error('AU CARD INCOMPLETE — AUTO GENERATE DISABLED'+(detail?' — '+detail:(payload.error?' — '+payload.error:'')));
+    }
+    if (payload.execution_region && payload.execution_region!=='ap-southeast-2') {
+      throw new Error('AU CARD INCOMPLETE — AUTO GENERATE DISABLED — Sportsbet gateway ran outside Sydney ('+payload.execution_region+').');
+    }
+    const meetings=Array.isArray(payload.meetings)?payload.meetings:[];
     loadedRacingCard=meetings.flatMap(m=>(m.races||[]).map(r=>{
       const venue=m.venue || r.venue || 'Unknown track';
       const feature=featureRaceMeta(date,venue,r.race_number);
       const runners=(r.runners||[]).map(x=>({
-        number:x.number ?? x.runner_number, name:x.name || x.runner_name || 'Runner',
+        number:x.runner_number, name:x.horse_name || 'Runner',
         jockey:x.jockey || '', trainer:x.trainer || '', barrier:x.barrier ?? null,
-        scratched:Boolean(x.scratched), odds:null, place_odds:null, form:x.form || '',
-        emergency:Boolean(x.emergency), runner_ref:x.runner_ref || null, scratching:x.scratching || null
+        scratched:Boolean(x.scratched), odds:null, place_odds:null, form:'',
+        emergency:false, runner_ref:null, scratching:null
       }));
-      const providerRaceId=r.race_id || null;
       return {
-        id:providerRaceId || ('peacc:'+date+':'+venue+':'+r.race_number),
-        provider_id:providerRaceId, track:titleCase(venue), race_number:r.race_number,
-        name:feature?.name || r.race_name || r.name || ('Race '+(r.race_number||'')),
-        time:r.start_time || r.race_time || r.advertised_start_time || acceptanceTimeISO(date,r.start_time_local,m,venue) || null,
-        distance:r.distance_m ?? r.distance ?? null, class:feature?.grade || r.race_class || r.class || '',
-        conditions:r.conditions || '', runners,
+        id:'sb:'+r.sportsbet_race_id, provider_id:r.sportsbet_race_id, sportsbet_race_id:r.sportsbet_race_id,
+        track:titleCase(venue), race_number:r.race_number,
+        name:feature?.name || r.race_name || ('Race '+(r.race_number||'')),
+        time:r.start_time, distance:r.distance ?? null, class:feature?.grade || '',
+        conditions:'', runners,
         active_runners:runners.filter(x=>!x.scratched).length, total_runners:runners.length,
         scratched_runners:runners.filter(x=>x.scratched).length, runner_count_complete:true,
-        provider:'puntersedge'
+        provider:'sportsbet'
       };
-    })).filter(r=>r.time && Number.isFinite(new Date(r.time).getTime())).sort((a,b)=>new Date(a.time)-new Date(b.time));
-    if (!loadedRacingCard.length) throw new Error('PuntersEdge returned no timed Australian thoroughbred races for '+date+'.');
-    document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10?'inline-flex':'none';
+    })).sort((a,b)=>new Date(a.time)-new Date(b.time));
+    if (!loadedRacingCard.length) throw new Error('AU CARD INCOMPLETE — AUTO GENERATE DISABLED — Sportsbet returned no Australian thoroughbred races.');
+    autoBtn.style.display=loadedRacingCard.length>=10?'inline-flex':'none';
     clearGeneratedCard();
-  } catch(e) { container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>'; }
+    showToast('Sportsbet card loaded and validated via Sydney gateway','success');
+  } catch(e) {
+    loadedRacingCard=[];
+    autoBtn.style.display='none';
+    clearGeneratedCard();
+    container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>';
+  }
 }
 function titleCase(v) { return String(v || '').replace(/\b\w/g, c => c.toUpperCase()); }
 function featureRaceMeta(date, venue, raceNumber) {
@@ -3028,7 +3042,7 @@ async function addLoadedRace(apiId) {
   const {error:runnerError}=await db.from('runners').insert(runnerRows);
   if (runnerError) { await db.from('races').delete().eq('id',savedRace.id); showToast('Could not save runners: '+runnerError.message,'danger'); return; }
   state.races.push(newRace);
-  showToast('R'+r.race_number+' '+r.track+' added from PuntersEdge acceptances','success');
+  showToast('R'+r.race_number+' '+r.track+' added from '+(r.provider==='sportsbet'?'Sportsbet card':'race card'),'success');
   renderAdminRaceList(); renderRaces();
 }
 
