@@ -2730,7 +2730,8 @@ function raceMinuteAWST(r) {
 }
 
 function autoGenerateCard() {
-  if (loadedRacingCard.length < 10) { showToast('Not enough races loaded', 'warn'); return; }
+  const autoEligibleRaces = loadedRacingCard.filter(r => Number(r.active_runners ?? (r.runners||[]).filter(x=>!x.scratched).length) >= 8);
+  if (autoEligibleRaces.length < 10) { showToast('Not enough races with 8+ active runners for an automatic 10-race card. You can still add races manually.', 'warn'); return; }
   const start = 9*60+30, end = 16*60;
   const targets = Array.from({length:10}, (_,i)=> start + ((end-start)*i/9));
   const chosen = [], used = new Set(), venueCounts = new Map();
@@ -2747,7 +2748,7 @@ function autoGenerateCard() {
   };
 
   // Feature races first, but never let one meeting dominate the 10-race card.
-  [...loadedRacingCard]
+  [...autoEligibleRaces]
     .filter(r => groupPriority(r) > 0)
     .sort((a,b) => groupPriority(b)-groupPriority(a) || (raceMinuteAWST(a) ?? 9999)-(raceMinuteAWST(b) ?? 9999))
     .forEach(r => {
@@ -2758,7 +2759,7 @@ function autoGenerateCard() {
   // Fill remaining slots near evenly spaced AWST target times, still enforcing max 2 per venue.
   for (const target of targets) {
     if (chosen.length >= 10) break;
-    const candidates = loadedRacingCard
+    const candidates = autoEligibleRaces
       .filter(r => !used.has(r.id) && venueAvailable(r))
       .sort((a,b) => {
         const am=raceMinuteAWST(a), bm=raceMinuteAWST(b);
@@ -2780,7 +2781,7 @@ function autoGenerateCard() {
   document.getElementById('clear-auto-btn').style.display='inline-flex';
   document.getElementById('accept-auto-btn').style.display=chosen.length===10 ? 'inline-flex' : 'none';
   document.getElementById('regen-auto-btn').style.display='inline-flex';
-  if (chosen.length===10) showToast('10-race draft generated — max 2 races per track', 'success');
+  if (chosen.length===10) showToast('10-race draft generated — 8+ active runners · max 2 races per track', 'success');
 }
 
 function editGeneratedCard() {
@@ -3058,7 +3059,16 @@ function renderSettleList() {
         <div class="form-group" style="margin:0;"><label>2nd Place #</label><input type="number" id="pos2-${race.id}" value="${race.result_2nd || ''}" min="1" max="30"></div>
         <div class="form-group" style="margin:0;"><label>2nd — PLACE ($)</label><input type="number" id="place2-${race.id}" step="0.01" min="0"></div>
         <div class="form-group" style="margin:0;"><label>3rd Place #</label><input type="number" id="pos3-${race.id}" value="${race.result_3rd || ''}" min="1" max="30"></div>
-        <div class="form-group" style="margin:0;"><label>3rd — PLACE ($)</label><input type="number" id="place3-${race.id}" step="0.01" min="0"></div>
+        <div class="form-group" style="margin:0;">
+          <label>3rd — PLACE ($)</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <input type="number" id="place3-${race.id}" step="0.01" min="0" style="flex:1;min-width:100px;">
+            <label style="display:flex;align-items:center;gap:6px;margin:0;white-space:nowrap;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="no-place3-${race.id}" onchange="toggleNoThirdDividend('${race.id}', this.checked)" style="width:auto;">
+              No 3rd dividend
+            </label>
+          </div>
+        </div>
       </div>
       <button class="btn btn-gold" onclick="settleRace('${race.id}')">Settle Race ${race.race_number}</button>
     </div>`;
@@ -3100,6 +3110,14 @@ async function fetchFinalResult(raceId) {
     showToast('Could not fetch final result: ' + error.message, 'danger');
   }
 }
+function toggleNoThirdDividend(raceId, checked) {
+  const input = document.getElementById('place3-' + raceId);
+  if (!input) return;
+  input.disabled = checked;
+  input.value = checked ? '' : input.value;
+  input.placeholder = checked ? 'No dividend' : '';
+}
+
 async function settleRace(raceId) {
   const race = state.races.find(r => r.id === raceId);
   if (!race) return;
@@ -3112,9 +3130,10 @@ async function settleRace(raceId) {
   const place1 = parseFloat(document.getElementById(`place1-${raceId}`).value);
   const place2 = parseFloat(document.getElementById(`place2-${raceId}`).value);
   const place3El = document.getElementById(`place3-${raceId}`);
-  const place3 = place3El.value === '' ? null : parseFloat(place3El.value);
-  if (!pos1 || !pos2 || !Number.isFinite(winDiv) || !Number.isFinite(place1) || !Number.isFinite(place2) || (pos3 && !Number.isFinite(place3))) {
-    showToast('Enter 1st + win/place, 2nd + place, and 3rd + place when paid', 'warn'); return;
+  const noThirdDividend = document.getElementById(`no-place3-${raceId}`)?.checked === true;
+  const place3 = noThirdDividend ? 0 : (place3El.value === '' ? null : parseFloat(place3El.value));
+  if (!pos1 || !pos2 || !Number.isFinite(winDiv) || !Number.isFinite(place1) || !Number.isFinite(place2) || (pos3 && !noThirdDividend && !Number.isFinite(place3))) {
+    showToast('Enter 1st + win/place, 2nd + place, and 3rd + place — or tick No 3rd dividend', 'warn'); return;
   }
   const changes = { favourite_number:fav||null, result_1st:pos1, result_2nd:pos2, result_3rd:pos3,
     win_div:winDiv, place_div:place1, place_div_2nd:place2, place_div_3rd:place3, status:'settled' };
