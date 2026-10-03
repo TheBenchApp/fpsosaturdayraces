@@ -18,7 +18,8 @@ export default async (request) => {
   if (action === "next_to_go") {
     if (!upstream.searchParams.has("num_races")) upstream.searchParams.set("num_races","200");
     if (!upstream.searchParams.has("categories")) upstream.searchParams.set("categories","horse");
-    if (!upstream.searchParams.has("bookmakers")) upstream.searchParams.set("bookmakers","sportsbet");\n    if (!upstream.searchParams.has("country")) upstream.searchParams.set("country","AU");
+    if (!upstream.searchParams.has("bookmakers")) upstream.searchParams.set("bookmakers","sportsbet");
+    if (!upstream.searchParams.has("country")) upstream.searchParams.set("country","AU");
     if (!upstream.searchParams.has("include_unresolved")) upstream.searchParams.set("include_unresolved","true");
   }
 
