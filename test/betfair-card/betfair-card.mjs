@@ -67,3 +67,11 @@ export function validateBetfairMeeting(meeting){
   }
   return {ok:errors.length===0,status:errors.length?"AU CARD INCOMPLETE":"OK",auto_generate_enabled:errors.length===0,errors:[...new Set(errors)]};
 }
+
+
+export function validateAustralianCard(meetings){
+  const errors=[];
+  if(!Array.isArray(meetings)||!meetings.length) errors.push("no_australian_meetings");
+  for(const m of meetings||[]){const v=validateBetfairMeeting(m);if(!v.ok)errors.push(...v.errors.map(e=>clean(m?.venue||"unknown")+":"+e))}
+  return {ok:errors.length===0,status:errors.length?"AU CARD INCOMPLETE":"OK",auto_generate_enabled:errors.length===0,errors};
+}
