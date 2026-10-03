@@ -3,6 +3,61 @@ const clean=s=>String(s??"").replace(/\s+/g," ").trim();
 const int=v=>{const n=Number.parseInt(String(v??"").replace(/\D/g,""),10);return Number.isFinite(n)?n:null};
 const decode=s=>clean(String(s??"").replace(/&amp;/g,"&").replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/&lt;/g,"<").replace(/&gt;/g,">"));
 
+
+export function extractSportsbetAllRacing(payload, wantedDate){
+  const meetings=[];
+  const dates=Array.isArray(payload?.dates)?payload.dates:[];
+  for(const dateBlock of dates){
+    for(const section of dateBlock?.sections||[]){
+      if(String(section?.raceType||"").toLowerCase()!=="horse" && String(section?.displayName||"").toLowerCase()!=="horses") continue;
+      for(const m of section?.meetings||[]){
+        if(m?.isInternational || String(m?.regionName||"").toLowerCase()!=="australia") continue;
+        const races=(m?.events||[]).map(e=>({
+          source:"sportsbet-api",
+          venue:clean(m.name),
+          race_number:Number(e.raceNumber),
+          sportsbet_race_id:String(e.id??""),
+          sportsbet_url:e.httpLink?new URL(String(e.httpLink).replace(/^\/+/, ""), "https://www.sportsbet.com.au/").href:"",
+          race_name:clean(e.name).replace(/^R\d+\s*/i,""),
+          distance:Number.parseInt(e.distance,10)||null,
+          start_time:Number.isFinite(Number(e.startTime))?new Date(Number(e.startTime)*1000).toISOString():null,
+          runners:[],
+          sportsbet_competition_id:String(m.id??""),
+          source_date:wantedDate||null
+        })).sort((a,b)=>a.race_number-b.race_number);
+        meetings.push({venue:clean(m.name),sportsbet_competition_id:String(m.id??""),expected_race_count:races.length,races});
+      }
+    }
+  }
+  return meetings;
+}
+
+export function attachSportsbetRacecard(race, payload){
+  const event=payload?.racecardEvent||payload;
+  if(!event || Number(event.id)!==Number(race?.sportsbet_race_id)) return {...race,runners:[],racecard_error:"event_id_mismatch"};
+  const market=(event.markets||[]).find(m=>String(m?.name||"").toLowerCase()==="win or place") || (event.markets||[]).find(m=>Array.isArray(m?.selections));
+  const runners=(market?.selections||[]).map(s=>({
+    runner_number:Number(s.runnerNumber),
+    horse_name:clean(s.name),
+    barrier:Number.isFinite(Number(s.drawNumber))?Number(s.drawNumber):null,
+    jockey:clean(s.jockey),
+    trainer:clean(s.trainer),
+    scratched:Boolean(s.isOut)||String(s.statusCode||"").toUpperCase()==="S"
+  })).sort((a,b)=>a.runner_number-b.runner_number);
+  return {
+    ...race,
+    race_name:clean(event.name||race.race_name).replace(/^R\d+\s*/i,""),
+    distance:Number.parseInt(event.distance,10)||race.distance,
+    start_time:Number.isFinite(Number(event.startTime))?new Date(Number(event.startTime)*1000).toISOString():race.start_time,
+    runners
+  };
+}
+
+export function perthDisplayTime(iso){
+  if(!iso) return null;
+  return new Intl.DateTimeFormat("en-AU",{timeZone:"Australia/Perth",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(iso));
+}
+
 export function extractMeetingRaceLinks(html, baseUrl="https://www.sportsbet.com.au"){
   const out=new Map();
   const re=/href=["']([^"']*\/horse-racing\/australia-nz\/[^"']*\/race-(\d+)-(\d+)[^"']*)["']/gi;
