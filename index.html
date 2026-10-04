@@ -2680,9 +2680,9 @@ function meetingTimeZone(meeting, venue) {
     ['Australia/Perth','ascot,belmont,belmontpark,northam,pinjarra,pinjarrascarps,bunbury,geraldton,kalgoorlie,albany,broome,carnarvon,york,esperance'],
     ['Australia/Adelaide','morphettville,murraybridge,gawler,balaklava,strathalbyn,portlincoln,oakbank,bordertown,naracoorte,mountgambier,clare'],
     ['Australia/Darwin','darwin,pioneerpark,alicesprings,katherine,tennantcreek'],
-    ['Australia/Melbourne','flemington,caulfield,sandown,sandownhillside,sandownlakeside,mooneevalley,bendigo,ballarat,geelong,cranbourne,pakenham,mornington,warrnambool,sale,moe,wangaratta,echuca,hamilton,ararat,terang,benalla,seymour'],
-    ['Australia/Sydney','randwick,rosehill,rosehillgardens,canterbury,warwickfarm,newcastle,kembla,kemblagrange,gosford,hawkesbury,grafton,wyong,ballina,cootamundra,mungery,mungerypicnic,dubbo,tamworth,muswellbrook,portmacquarie,coffsharbour,nowra,orange,bathurst,wagga,waggawagga,albury'],
-    ['Australia/Brisbane','eaglefarm,doomben,goldcoast,sunshinecoast,ipswich,toowoomba,townsville,cairns,mackay,rockhampton,bundaberg,charleville,warwick,dalby,gatton,beaudesert'],
+    ['Australia/Melbourne','flemington,caulfield,sandown,sandownhillside,sandownlakeside,mooneevalley,bendigo,ballarat,geelong,cranbourne,pakenham,mornington,warrnambool,sale,moe,wangaratta,echuca,hamilton,ararat,terang,benalla,seymour,mildura'],
+    ['Australia/Sydney','randwick,rosehill,rosehillgardens,canterbury,warwickfarm,newcastle,kembla,kemblagrange,gosford,hawkesbury,grafton,wyong,ballina,cootamundra,mungery,mungerypicnic,dubbo,tamworth,muswellbrook,portmacquarie,coffsharbour,nowra,orange,bathurst,wagga,waggawagga,albury,goulburn'],
+    ['Australia/Brisbane','eaglefarm,doomben,goldcoast,sunshinecoast,ipswich,toowoomba,townsville,cairns,mackay,rockhampton,bundaberg,charleville,warwick,dalby,gatton,beaudesert,kilcoy'],
     ['Australia/Hobart','hobart,launceston,devonport']
   ];
   for(const key of keys) for(const [zone,list] of groups) {
@@ -2802,7 +2802,8 @@ async function loadRaceCard() {
       };
     })).filter(r=>r.time && Number.isFinite(new Date(r.time).getTime())).sort((a,b)=>new Date(a.time)-new Date(b.time));
     if (!loadedRacingCard.length) throw new Error('PuntersEdge returned no timed Australian thoroughbred races for '+date+'.');
-    document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10?'inline-flex':'none';
+    const cardHasUntimedRaces=untimedMeetings.size>0;
+    document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10 && !cardHasUntimedRaces?'inline-flex':'none';
     clearGeneratedCard();
     if (pendingMeetings.length) {
       const names=pendingMeetings.map(m=>m.venue_canonical||m.venue||m.venue_norm||'Unknown meeting');
@@ -2810,7 +2811,7 @@ async function loadRaceCard() {
     }
     if (untimedMeetings.size) {
       const missing=[...untimedMeetings.entries()].map(([venue,count])=>venue+' ('+count+' races)').join(', ');
-      container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Card warning:</strong> '+escapeHtml(missing)+' could not be timed and were excluded. Auto Generate uses only the timed races shown below.</div>');
+      container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Card warning:</strong> '+escapeHtml(missing)+' could not be timed and were excluded. AU CARD INCOMPLETE — AUTO GENERATE DISABLED.</div>');
     }
   } catch(e) { container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>'; }
 }
