@@ -2802,16 +2802,23 @@ async function loadRaceCard() {
       };
     })).filter(r=>r.time && Number.isFinite(new Date(r.time).getTime())).sort((a,b)=>new Date(a.time)-new Date(b.time));
     if (!loadedRacingCard.length) throw new Error('PuntersEdge returned no timed Australian thoroughbred races for '+date+'.');
-    const cardHasUntimedRaces=untimedMeetings.size>0;
+    const isPicnicMeeting=name=>/\bpicnic\b/i.test(String(name||'').replace(/[,/_-]+/g,' '));
+    const blockingUntimedMeetings=new Map([...untimedMeetings].filter(([venue])=>!isPicnicMeeting(venue)));
+    const excludedPicnicMeetings=new Map([...untimedMeetings].filter(([venue])=>isPicnicMeeting(venue)));
+    const cardHasUntimedRaces=blockingUntimedMeetings.size>0;
     document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10 && !cardHasUntimedRaces?'inline-flex':'none';
     clearGeneratedCard();
     if (pendingMeetings.length) {
       const names=pendingMeetings.map(m=>m.venue_canonical||m.venue||m.venue_norm||'Unknown meeting');
       container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Acceptances pending:</strong> '+escapeHtml(names.join(', '))+'. Reload AU Card later to pick them up.</div>');
     }
-    if (untimedMeetings.size) {
-      const missing=[...untimedMeetings.entries()].map(([venue,count])=>venue+' ('+count+' races)').join(', ');
+    if (blockingUntimedMeetings.size) {
+      const missing=[...blockingUntimedMeetings.entries()].map(([venue,count])=>venue+' ('+count+' races)').join(', ');
       container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Card warning:</strong> '+escapeHtml(missing)+' could not be timed and were excluded. AU CARD INCOMPLETE — AUTO GENERATE DISABLED.</div>');
+    }
+    if (excludedPicnicMeetings.size) {
+      const excluded=[...excludedPicnicMeetings.entries()].map(([venue,count])=>venue+' ('+count+' races)').join(', ');
+      container.insertAdjacentHTML('afterbegin','<div class="alert alert-info" style="margin-bottom:10px;"><strong>Excluded picnic meeting:</strong> '+escapeHtml(excluded)+'. This does not block Auto Generate.</div>');
     }
   } catch(e) { container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>'; }
 }
