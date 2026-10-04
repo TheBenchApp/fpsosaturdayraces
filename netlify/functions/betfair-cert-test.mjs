@@ -1,4 +1,4 @@
-const https = require("https");
+import https from "node:https";
 const required=["BETFAIR_USERNAME","BETFAIR_PASSWORD","BETFAIR_APP_KEY","BETFAIR_CLIENT_CERT_B64","BETFAIR_CLIENT_KEY_B64"];
 const clean=v=>String(v??"").replace(/\\s+/g," ").trim();
 const pemFromBase64=(v,type)=>{
@@ -12,7 +12,7 @@ const pemFromBase64=(v,type)=>{
  return decoded+"\n";
 };
 const num=v=>Number.isFinite(Number(v))?Number(v):null;
-const reply=(statusCode,body)=>({statusCode,headers:{"content-type":"application/json","cache-control":"no-store"},body:JSON.stringify(body)});
+const jsonResponse=(status,body)=>new Response(JSON.stringify(body),{status,headers:{"content-type":"application/json","cache-control":"no-store"}});
 function post(hostname,path,headers,body,cert,key){
  return new Promise((resolve,reject)=>{const q=https.request({hostname,port:443,path,method:"POST",cert,key,headers:{...headers,"Content-Length":Buffer.byteLength(body)}},r=>{let d="";r.on("data",c=>d+=c);r.on("end",()=>resolve({status:r.statusCode||0,body:d}))});q.on("error",reject);q.write(body);q.end()});
 }
@@ -38,13 +38,13 @@ function validate(meeting){
  if(nums.size){const max=Math.max(...nums);for(let i=1;i<=max;i++)if(!nums.has(i))e.push("missing_race_"+i)}
  return{ok:e.length===0,errors:[...new Set(e)]};
 }
-exports.handler=async event=>{
+export default async (request)=>{
  try{
-  const missing=required.filter(k=>!process.env[k]);if(missing.length)return reply(500,{ok:false,status:"BETFAIR_SECRETS_MISSING",missing,auto_generate_enabled:false});
-  const date=event?.queryStringParameters?.date;if(!/^\d{4}-\d{2}-\d{2}$/.test(date||""))return reply(400,{ok:false,status:"DATE_REQUIRED",message:"Use ?date=YYYY-MM-DD",auto_generate_enabled:false});
+  const missing=required.filter(k=>!process.env[k]);if(missing.length)return jsonResponse(500,{ok:false,status:"BETFAIR_SECRETS_MISSING",missing,auto_generate_enabled:false});
+  const date=new URL(request.url).searchParams.get("date");if(!/^\d{4}-\d{2}-\d{2}$/.test(date||""))return jsonResponse(400,{ok:false,status:"DATE_REQUIRED",message:"Use ?date=YYYY-MM-DD",auto_generate_enabled:false});
   const app=process.env.BETFAIR_APP_KEY;const loginBody=new URLSearchParams({username:process.env.BETFAIR_USERNAME,password:process.env.BETFAIR_PASSWORD}).toString();
   const login=await post("identitysso-cert.betfair.com.au","/api/certlogin",{"X-Application":app,"Content-Type":"application/x-www-form-urlencoded"},loginBody,pemFromBase64(process.env.BETFAIR_CLIENT_CERT_B64,"CERT"),pemFromBase64(process.env.BETFAIR_CLIENT_KEY_B64,"KEY"));
-  let lj={};try{lj=JSON.parse(login.body)}catch{};if(login.status!==200||lj.loginStatus!=="SUCCESS"||!lj.sessionToken)return reply(502,{ok:false,status:"BETFAIR_LOGIN_FAILED",http_status:login.status,login_status:lj.loginStatus||null,auto_generate_enabled:false});
+  let lj={};try{lj=JSON.parse(login.body)}catch{};if(login.status!==200||lj.loginStatus!=="SUCCESS"||!lj.sessionToken)return jsonResponse(502,{ok:false,status:"BETFAIR_LOGIN_FAILED",http_status:login.status,login_status:lj.loginStatus||null,auto_generate_enabled:false});
   const token=lj.sessionToken;
   // Perth is UTC+8 year-round: a Perth calendar day begins 16:00Z on the previous UTC date.
   const perthStart=new Date(date+"T00:00:00+08:00");
@@ -57,6 +57,6 @@ exports.handler=async event=>{
   const eventIds=new Set(ids.map(String)); const returnedEventIds=new Set(meetings.map(m=>String(m.betfair_event_id))); const missingEvents=[...eventIds].filter(id=>!returnedEventIds.has(id));
   const wholeErrors=[...bad.flatMap(m=>m.validation.errors.map(e=>m.venue+":"+e)),...missingEvents.map(id=>"event_"+id+":no_WIN_markets")];
   const valid=wholeErrors.length===0 && meetings.length===events.length;
-  return reply(valid?200:422,{ok:valid,status:valid?"BETFAIR_CARD_VALID":"AU CARD INCOMPLETE",date,event_count:events.length,meeting_count:meetings.length,race_count:meetings.reduce((n,m)=>n+m.races.length,0),auto_generate_enabled:false,diagnostics:{errors:wholeErrors,missing_event_ids:missingEvents},meetings,note:"Diagnostic branch only; production Auto Generate remains disabled."});
- }catch(err){return reply(500,{ok:false,status:"BETFAIR_CARD_ERROR",error:String(err?.message||err),auto_generate_enabled:false})}
+  return jsonResponse(valid?200:422,{ok:valid,status:valid?"BETFAIR_CARD_VALID":"AU CARD INCOMPLETE",date,event_count:events.length,meeting_count:meetings.length,race_count:meetings.reduce((n,m)=>n+m.races.length,0),auto_generate_enabled:false,diagnostics:{errors:wholeErrors,missing_event_ids:missingEvents},meetings,note:"Diagnostic branch only; production Auto Generate remains disabled."});
+ }catch(err){return jsonResponse(500,{ok:false,status:"BETFAIR_CARD_ERROR",error:String(err?.message||err),auto_generate_enabled:false})}
 };
