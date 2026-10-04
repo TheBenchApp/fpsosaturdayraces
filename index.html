@@ -2680,11 +2680,16 @@ function meetingTimeZone(meeting, venue) {
     ['Australia/Adelaide','morphettville,murraybridge,gawler,balaklava,strathalbyn,portlincoln,oakbank,bordertown'],
     ['Australia/Darwin','darwin,pioneerpark,alicesprings'],
     ['Australia/Melbourne','flemington,caulfield,sandown,sandownhillside,sandownlakeside,mooneevalley,bendigo,ballarat,geelong,cranbourne,pakenham,mornington,warrnambool,sale,moe'],
-    ['Australia/Sydney','randwick,rosehill,rosehillgardens,canterbury,warwickfarm,newcastle,kembla,kemblagrange,gosford,hawkesbury,grafton,wyong'],
+    ['Australia/Sydney','randwick,rosehill,rosehillgardens,canterbury,warwickfarm,newcastle,kembla,kemblagrange,gosford,hawkesbury,grafton,wyong,muswellbrook'],
     ['Australia/Brisbane','eaglefarm,doomben,goldcoast,sunshinecoast,ipswich,toowoomba,townsville,cairns,mackay,rockhampton,bundaberg'],
     ['Australia/Hobart','hobart,launceston,devonport']
   ];
-  for(const [zone,list] of groups) if(list.split(',').includes(v)) return zone;
+  // Provider venue labels can include prefixes/suffixes (for example "Southside Pakenham").
+  // Match a known venue token rather than requiring the entire label to be identical.
+  for(const [zone,list] of groups) {
+    const venues=list.split(',');
+    if(venues.some(name => v===name || v.endsWith(name) || v.startsWith(name))) return zone;
+  }
   return null;
 }
 function zonedLocalToISO(date,hour,minute,timeZone) {
@@ -2765,6 +2770,7 @@ async function loadRaceCard() {
     const payload=await res.json();
     if (!res.ok) throw new Error(payload.detail || payload.error || 'PuntersEdge acceptances request failed');
     const meetings=Array.isArray(payload.meetings) ? payload.meetings : [];
+    const untimedMeetings = new Map();
     loadedRacingCard=meetings.flatMap(m=>(m.races||[]).map(r=>{
       const venue=m.venue || r.venue || 'Unknown track';
       const feature=featureRaceMeta(date,venue,r.race_number);
@@ -2775,11 +2781,16 @@ async function loadRaceCard() {
         emergency:Boolean(x.emergency), runner_ref:x.runner_ref || null, scratching:x.scratching || null
       }));
       const providerRaceId=r.race_id || null;
+      const resolvedTime=r.start_time || r.race_time || r.advertised_start_time || acceptanceTimeISO(date,r.start_time_local,m,venue) || null;
+      if (!resolvedTime || !Number.isFinite(new Date(resolvedTime).getTime())) {
+        const key=titleCase(venue);
+        untimedMeetings.set(key,(untimedMeetings.get(key)||0)+1);
+      }
       return {
         id:providerRaceId || ('peacc:'+date+':'+venue+':'+r.race_number),
         provider_id:providerRaceId, track:titleCase(venue), race_number:r.race_number,
         name:feature?.name || r.race_name || r.name || ('Race '+(r.race_number||'')),
-        time:r.start_time || r.race_time || r.advertised_start_time || acceptanceTimeISO(date,r.start_time_local,m,venue) || null,
+        time:resolvedTime,
         distance:r.distance_m ?? r.distance ?? null, class:feature?.grade || r.race_class || r.class || '',
         conditions:r.conditions || '', runners,
         active_runners:runners.filter(x=>!x.scratched).length, total_runners:runners.length,
@@ -2790,6 +2801,10 @@ async function loadRaceCard() {
     if (!loadedRacingCard.length) throw new Error('PuntersEdge returned no timed Australian thoroughbred races for '+date+'.');
     document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10?'inline-flex':'none';
     clearGeneratedCard();
+    if (untimedMeetings.size) {
+      const missing=[...untimedMeetings.entries()].map(([venue,count])=>venue+' ('+count+' races)').join(', ');
+      container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Card warning:</strong> '+escapeHtml(missing)+' could not be timed and were excluded. Auto Generate uses only the timed races shown below.</div>');
+    }
   } catch(e) { container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>'; }
 }
 function titleCase(v) { return String(v || '').replace(/\b\w/g, c => c.toUpperCase()); }
