@@ -38,9 +38,10 @@ function validate(meeting){
  if(nums.size){const max=Math.max(...nums);for(let i=1;i<=max;i++)if(!nums.has(i))e.push("missing_race_"+i)}
  return{ok:e.length===0,errors:[...new Set(e)]};
 }
-export default async (request)=>{\n try{
+export default async (request)=>{
+ try{
   const missing=required.filter(k=>!process.env[k]);if(missing.length)return jsonResponse(500,{ok:false,status:"BETFAIR_SECRETS_MISSING",missing,auto_generate_enabled:false});
-  const date=event?.queryStringParameters?.date;if(!/^\d{4}-\d{2}-\d{2}$/.test(date||""))return jsonResponse(400,{ok:false,status:"DATE_REQUIRED",message:"Use ?date=YYYY-MM-DD",auto_generate_enabled:false});
+  const date=new URL(request.url).searchParams.get("date");if(!/^\d{4}-\d{2}-\d{2}$/.test(date||""))return jsonResponse(400,{ok:false,status:"DATE_REQUIRED",message:"Use ?date=YYYY-MM-DD",auto_generate_enabled:false});
   const app=process.env.BETFAIR_APP_KEY;const loginBody=new URLSearchParams({username:process.env.BETFAIR_USERNAME,password:process.env.BETFAIR_PASSWORD}).toString();
   const login=await post("identitysso-cert.betfair.com.au","/api/certlogin",{"X-Application":app,"Content-Type":"application/x-www-form-urlencoded"},loginBody,pemFromBase64(process.env.BETFAIR_CLIENT_CERT_B64,"CERT"),pemFromBase64(process.env.BETFAIR_CLIENT_KEY_B64,"KEY"));
   let lj={};try{lj=JSON.parse(login.body)}catch{};if(login.status!==200||lj.loginStatus!=="SUCCESS"||!lj.sessionToken)return jsonResponse(502,{ok:false,status:"BETFAIR_LOGIN_FAILED",http_status:login.status,login_status:lj.loginStatus||null,auto_generate_enabled:false});
