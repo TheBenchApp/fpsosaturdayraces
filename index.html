@@ -959,7 +959,7 @@
       <h3>Entry Fee</h3>
       <p>Entry is <strong>$10 per valid entry</strong>. Cash goes in the plastic sleeve in the office — not to admin, not through this app, directly into the sleeve.</p>
       <p>Once the winner is declared, they'll post their bank details and everyone transfers directly. Multiple completed entries means multiple $10 entry fees. Pay up.</p>
-      <p><em>This app does not handle, process, or track any money. Entry fees and payments are entirely between participants.</em></p>
+      <p><em>This app records self-reported payment status but does not handle or process money. Entry fees and payments are entirely between participants.</em></p>
 
       <h3>Scratchings</h3>
       <p>If your horse gets scratched, you'll automatically be allocated the pre-race favourite, captured at race time. What happens to that favourite after is between you and the racing gods.</p>
@@ -1084,6 +1084,7 @@
   </div>
 </div>
 
+<div id="public-payment-list" class="card" style="margin:20px;"></div>
 <!-- ===== MAIN APP ===== -->
 <div id="main-app" style="display:none;">
 
@@ -1103,6 +1104,7 @@
     </div>
   </div>
 
+  <div id="settlement-attention" role="alert" style="display:none;margin:12px;"></div>
   <!-- Fixed event controls -->
   <div class="event-controls-fixed">
     <div class="event-banner">
@@ -1111,12 +1113,15 @@
     </div>
     <div class="nav-tabs" id="main-nav">
       <button class="nav-tab active" onclick="showTab('races')" id="tab-races">🏁 Races</button>
+      <button class="nav-tab" onclick="showTab('payments')" id="tab-payments">Payments</button>
       <button class="nav-tab" onclick="showTab('leaderboard')" id="tab-leaderboard">🏆 Race Day</button>
       <button class="nav-tab" onclick="showTab('chat')" id="tab-chat">💬 Chat <span id="chat-unread-badge" class="chat-unread-badge" style="display:none;">0</span></button>
     </div>
   </div>
 
   <div class="main">
+  <div class="section" id="section-payments"><div class="card"><div class="card-title">Payments</div><div id="shared-paid-list"></div></div></div>
+
 
     <!-- ===== RACES TAB ===== -->
     <div class="section active" id="section-races">
@@ -1262,7 +1267,7 @@
       <div class="admin-section" id="admin-paid">
         <div class="card">
           <div class="card-title">Paid Checklist</div>
-          <div class="alert alert-warn">Only shows participants with all races selected (valid entries). Share with the winner to track transfers.</div>
+          <div class="alert alert-info">Everyone can see every entrant. Logged-in players control only their own payment status.</div>
           <div id="paid-list"></div>
         </div>
       </div>
@@ -1407,6 +1412,8 @@ async function initApp() {
   buildColourGrid();
   const loaded = await loadCurrentEvent();
   await checkLocalUser();
+  renderPaidList(); renderSettlementAttention(); setupRealtimeSubs();
+  setInterval(() => { renderSettlementAttention(); renderPaidList(); }, 60000);
   if (!loaded) showToast('Could not load the database. Use Refresh or reload to try again.', 'danger');
   document.getElementById('app-url-input').value = APP_URL;
   const raceDateInput = document.getElementById('race-date-input'); if (raceDateInput && !raceDateInput.value) raceDateInput.value = nextSaturdayISO(); syncEventLockoutToRaceDate();
@@ -1474,6 +1481,7 @@ async function loadCurrentEvent() {
     state.races = races;
     state.participants = participants;
     state.lockoutOverride = currentEvent?.lockout_override || null;
+    renderPaidList(); renderSettlementAttention();
     return true;
   } catch (e) {
     console.error('Event load error:', e);
@@ -1682,7 +1690,7 @@ function selectColour(hex) {
 function showLanding() {
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('modal-landing').classList.remove('hidden');
-  renderEventPreview();
+  renderEventPreview(); renderPaidList();
 }
 
 function renderEventPreview() {
@@ -1698,7 +1706,7 @@ function renderEventPreview() {
 
   const lockout = new Date(state.currentEvent.lockout_time);
   const isLocked = isSelectionsLocked();
-  const races = state.races;
+  const races = state.currentEvent.card_published ? state.races : [];
 
   box.innerHTML = `
     <div style="background:var(--dark3); border-radius:8px; padding:16px; margin-bottom:12px;">
@@ -1716,12 +1724,14 @@ function renderEventPreview() {
             <div style="font-size:14px; font-weight:600;">${r.name}</div>
             <div style="font-size:11px; color:var(--text-dim);">${r.runners ? r.runners.length : 0} runners · ${perthTime(r.race_time)}</div>
           </div>
-          <span class="pill ${r.status === 'settled' ? 'pill-gold' : 'pill-green'}">${r.status === 'settled' ? 'Settled' : 'Open'}</span>
+          <span class="pill ${r.status === 'settled' ? 'pill-gold' : 'pill-green'}">${raceLifecycle(r)}</span>
         </div>
       `).join('')
     }
   `;
 
+  document.getElementById('btn-enter').disabled=isLocked;
+  if(!isLocked){document.getElementById('btn-enter').textContent='Enter Race Day →';document.getElementById('btn-enter').style.opacity='1';}
   if (isLocked) {
     document.getElementById('btn-enter').textContent = '🔒 Registrations Closed';
     document.getElementById('btn-enter').disabled = true;
@@ -1876,6 +1886,7 @@ function showMainApp() {
 
 function isSelectionsLocked() {
   if (!state.currentEvent) return true;
+  if (!state.currentEvent.card_published) return true;
   if (state.lockoutOverride === 'open') return false;
   if (state.lockoutOverride === 'locked') return true;
   return new Date(state.currentEvent.lockout_time) <= new Date();
@@ -1924,6 +1935,7 @@ function showTab(tab) {
 
   if (tab === 'races') renderRaces();
   if (tab === 'leaderboard') { renderLeaderboard(); renderTracker(); }
+  if (tab === 'payments') renderPaidList();
   if (tab === 'chat') { markChatRead(); scrollChat(); }
 }
 
@@ -1970,6 +1982,10 @@ function loadUserSelections() {
 }
 
 function renderRaces() {
+  if(state.currentEvent && !state.currentEvent.card_published && !state.isAdmin) {
+    document.getElementById('race-list').innerHTML='<div class="alert alert-info">Race card awaiting validation and publication.</div>';
+    return;
+  }
   const container = document.getElementById('race-list');
   const lockedMsg = document.getElementById('races-locked-msg');
   const tbcMsg = document.getElementById('races-tbc');
@@ -2000,7 +2016,7 @@ function renderRaces() {
             <div class="race-meta">${perthTime(race.race_time)} · ${race.runners?.length || 0} runners</div>
           </div>
           <div style="display:flex; gap:8px; align-items:center;">
-            ${settled ? `<span class="pill pill-gold">Settled</span>` : `<span class="pill pill-green">Open</span>`}
+            <span class="pill ${settled ? 'pill-gold' : race.result_state==='protest' ? 'pill-red' : 'pill-green'}">${raceLifecycle(race)}</span>
             ${settled && race.result_1st ? `<span style="font-size:11px; color:var(--text-dim);">1st: #${race.result_1st}</span>` : ''}
           </div>
         </div>
@@ -2052,7 +2068,7 @@ function renderRaces() {
           </div>`}
           ${userSelection ? `
             <div style="margin-top:10px; font-size:12px; color:var(--gold); text-align:right;">
-              Your pick: #${userSelection} — ${(race.runners || []).find(r => r.number == userSelection)?.name || 'Unknown'}
+              Your pick: ${selectionLabel(race,userSelection)}
             </div>
           ` : (!isLocked && !settled && state.user ? `
             <div style="margin-top:10px; font-size:12px; color:var(--text-dim); text-align:right;">No selection yet</div>
@@ -2082,7 +2098,7 @@ function renderMySelections() {
       <div class="my-selection-row">
         <div class="my-selection-race">${index + 1}. ${escapeHtml(race.track)} R${race.race_number} · ${perthTime(race.race_time)}</div>
         <div class="my-selection-pick" style="color:${runner ? 'var(--text)' : 'var(--text-dim)'};">
-          ${runner ? '#' + runner.number + ' — ' + escapeHtml(runner.name) : 'Not selected'}
+          ${selectedNumber ? selectionLabel(race,selectedNumber) : 'Not selected'}
         </div>
       </div>
     `;
@@ -2183,7 +2199,7 @@ function renderLeaderboard() {
 function renderChampionBanner(scores) {
   const banner = document.getElementById('champion-banner');
   if (!banner) return;
-  const allSettled = state.races.length > 0 && state.races.every(r => r.status === 'settled');
+  const allSettled = state.races.length === 10 && state.races.every(r => r.status === 'settled');
   if (!allSettled || !scores.length) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
   const topTotal = scores[0].total;
   const winners = scores.filter(p => Math.abs(p.total - topTotal) < 0.0001);
@@ -2265,7 +2281,7 @@ function renderAllSelections(participants) {
               ${state.races.map(r => {
                 const sel = p.selections[r.id];
                 const runner = r.runners?.find(ru => ru.number == sel);
-                return `<td><span class="all-selection-pick">${sel ? `#${sel} ${runner ? escapeHtml(runner.name) : ''}` : '<span class="text-dim">—</span>'}</span></td>`;
+                return `<td><span class="all-selection-pick">${sel ? selectionLabel(r,sel) : '<span class="text-dim">—</span>'}</span></td>`;
               }).join('')}
             </tr>
           `).join('')}
@@ -2995,8 +3011,10 @@ function clearGeneratedCard() {
 
 async function acceptGeneratedCard() {
   const picks = loadedRacingCard.filter(r=>r.autoSelected).sort((a,b)=>(new Date(a.time||0))-(new Date(b.time||0)));
-  if (picks.length !== 10) { showToast('Generate a 10-race draft first', 'warn'); return; }
+  const problems=validateCard(picks);
+  if(problems.length){showToast(problems.join(' · '),'warn');return;}
   if (!state.currentEvent) { showToast('Create an event first', 'warn'); return; }
+  if(state.currentEvent.card_published || state.participants.some(p=>Object.keys(p.selections||{}).length)){showToast('Published cards and saved selections are protected. Create a new event for a replacement card.','warn');return;}
   if (state.races.length) {
     if (!confirm('Replace the current race card with this generated 10-race card?')) return;
     if (db) {
@@ -3019,7 +3037,7 @@ async function acceptGeneratedCard() {
   }
   if (added === 10) {
     clearGeneratedCard();
-    showToast('10-race card accepted and saved', 'success');
+    await publishCard();
   } else {
     showToast('Only ' + added + ' of 10 races saved. Review the card before publishing.', 'warn');
   }
@@ -3029,6 +3047,7 @@ async function addLoadedRace(apiId) {
   if (!db || !state.isAdmin) { showToast('Admin database connection required.','danger'); return; }
   const r=loadedRacingCard.find(x=>String(x.id)===String(apiId));
   if (!r || !state.currentEvent) { showToast('Create an event first','warn'); return; }
+  if(state.currentEvent.card_published){showToast('Published card is protected','warn');return;}
   if (state.races.length>=10) { showToast('Competition card is limited to 10 races','warn'); return; }
   if (state.races.some(x=>String(x.track).toLowerCase()===String(r.track).toLowerCase() && Number(x.race_number)===Number(r.race_number))) { showToast('That race is already on the card','warn'); return; }
 
@@ -3082,7 +3101,7 @@ function puntersEdgeRaceRunners(liveRace) {
 async function refreshSportsbetRace(raceId) {
   const savedRace=state.races.find(x=>String(x.id)===String(raceId));
   const race=savedRace?{...savedRace}:null;
-  if (!race) return;
+  if (!race || race.status==='settled') return;
   try {
     const res=await fetch('/.netlify/functions/puntersedge?action=next_to_go&num_races=200&categories=horse&bookmakers=sportsbet&include_unresolved=true');
     const payload=await res.json();
@@ -3169,7 +3188,7 @@ function renderAdminRaceList() {
     return;
   }
 
-  container.innerHTML = state.races.map(r => `
+  container.innerHTML = `<div class="alert alert-info">${state.currentEvent?.card_published?'Published card':'Draft — validate all 10 races before publishing'}</div>${state.currentEvent?.card_published?'':'<button class="btn btn-gold" onclick="publishCard()">Validate & Publish Card</button>'}` + state.races.map(r => `
     <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--dark3); border-radius:6px; margin-bottom:8px;">
       <div>
         <div style="font-weight:600;">Race ${r.race_number} — ${r.track}</div>
@@ -3177,7 +3196,7 @@ function renderAdminRaceList() {
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="btn btn-outline btn-sm" onclick="refreshSportsbetRace('${r.id}')">↻ Odds</button>
-        <span class="pill ${r.status === 'settled' ? 'pill-gold' : 'pill-green'}">${r.status}</span>
+        <span class="pill ${r.status === 'settled' ? 'pill-gold' : 'pill-green'}">${raceLifecycle(r)}</span>
         <button class="btn btn-danger btn-sm" onclick="removeRace('${r.id}')">✕</button>
       </div>
     </div>
@@ -3185,6 +3204,7 @@ function renderAdminRaceList() {
 }
 
 async function removeRace(raceId) {
+  if(state.currentEvent?.card_published){showToast('Published card is protected','warn');return;}
   if (!confirm('Remove this race?')) return;
   if (db) {
     // Remove child rows first for schemas without ON DELETE CASCADE.
@@ -3202,19 +3222,20 @@ async function removeRace(raceId) {
 
 function renderSettleList() {
   const container = document.getElementById('settle-race-list');
-  const unsettled = state.races.filter(r => r.status !== 'settled');
-  if (!unsettled.length) { container.innerHTML = '<div class="alert alert-success">All races settled! 🏆</div>'; return; }
+  const preserved = new Map([...container.querySelectorAll('input')].filter(el=>el.value || el.checked).map(el=>[el.id,{value:el.value,checked:el.checked}]));
+  const unsettled = state.races;
+  if (!unsettled.length) { container.innerHTML = '<div class="alert alert-info">No races yet.</div>'; return; }
 
   container.innerHTML = unsettled.map(race => {
-    const capturedFav = race.pre_race_favourite?.number || race.odds_snapshot_favourite?.number || race.favourite_number || '';
+    const capturedFav = race.pre_race_favourite?.number || race.favourite_number || '';
     return `
     <div class="card" style="margin-bottom:12px;">
-      <div style="font-family:'Press Start 2P',monospace; font-size:18px; color:var(--gold); margin-bottom:6px;">${race.track} — R${race.race_number} — ${race.name || 'Race '+race.race_number}</div>
+      <div style="font-family:'Press Start 2P',monospace; font-size:18px; color:var(--gold); margin-bottom:6px;">${escapeHtml(race.track)} — R${race.race_number} — ${escapeHtml(race.name || 'Race '+race.race_number)} · ${raceLifecycle(race)}</div>
       <div style="margin-bottom:10px; font-size:12px; color:var(--green-light);"><strong>Jump:</strong> ${perthTime(race.race_time)}</div>
-      <div style="margin-bottom:10px; font-size:12px; color:var(--text-dim);"><strong>Runners:</strong> ${(race.runners||[]).map(r => `#${r.number} ${r.name}`).join(' · ')}</div>
+      <div style="margin-bottom:10px; font-size:12px; color:var(--text-dim);"><strong>Runners:</strong> ${(race.runners||[]).map(r => `#${r.number} ${escapeHtml(r.name)}`).join(' · ')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
         <button class="btn btn-outline btn-sm" onclick="fetchFinalResult('${race.id}')">↻ Fetch Final Result</button>
-        <span id="result-status-${race.id}" class="text-xs text-dim" style="align-self:center;">${race.result_1st && race.result_2nd ? '✓ FINAL placings loaded automatically — enter Sportsbet dividends manually.' : 'Waiting for final placings · Sportsbet dividends entered manually'}</span>
+        <span id="result-status-${race.id}" class="text-xs text-dim" style="align-self:center;">${escapeHtml(race.settlement_reason || (race.status==='settled'?'FINAL — settled and protected':race.result_state==='final'?'FINAL placings captured — enter official Sportsbet dividends':'RESULT NOT FINAL — settlement blocked until verified FINAL'))}</span>
       </div>
       <div class="form-group" style="margin-bottom:10px;">
         <label>Pre-race favourite #</label>
@@ -3223,16 +3244,16 @@ function renderSettleList() {
       </div>
       <div class="settle-grid" style="margin-bottom:10px;">
         <div class="form-group" style="margin:0;"><label>1st Place #</label><input type="number" id="pos1-${race.id}" value="${race.result_1st || ''}" min="1" max="30"></div>
-        <div class="form-group" style="margin:0;"><label>1st — WIN ($)</label><input type="number" id="windiv-${race.id}" step="0.01" min="0"></div>
-        <div class="form-group" style="margin:0;"><label>1st — PLACE ($)</label><input type="number" id="place1-${race.id}" step="0.01" min="0"></div>
+        <div class="form-group" style="margin:0;"><label>1st — WIN ($)</label><input type="number" id="windiv-${race.id}" value="${race.win_div ?? ''}" step="0.01" min="0"></div>
+        <div class="form-group" style="margin:0;"><label>1st — PLACE ($)</label><input type="number" id="place1-${race.id}" value="${race.place_div ?? ''}" step="0.01" min="0"></div>
         <div></div>
         <div class="form-group" style="margin:0;"><label>2nd Place #</label><input type="number" id="pos2-${race.id}" value="${race.result_2nd || ''}" min="1" max="30"></div>
-        <div class="form-group" style="margin:0;"><label>2nd — PLACE ($)</label><input type="number" id="place2-${race.id}" step="0.01" min="0"></div>
+        <div class="form-group" style="margin:0;"><label>2nd — PLACE ($)</label><input type="number" id="place2-${race.id}" value="${race.place_div_2nd ?? ''}" step="0.01" min="0"></div>
         <div class="form-group" style="margin:0;"><label>3rd Place #</label><input type="number" id="pos3-${race.id}" value="${race.result_3rd || ''}" min="1" max="30"></div>
         <div class="form-group" style="margin:0;">
           <label>3rd — PLACE ($)</label>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <input type="number" id="place3-${race.id}" step="0.01" min="0" style="flex:1;min-width:100px;">
+            <input type="number" id="place3-${race.id}" value="${race.place_div_3rd ?? ''}" step="0.01" min="0" style="flex:1;min-width:100px;">
             <label style="display:flex;align-items:center;gap:6px;margin:0;white-space:nowrap;font-size:11px;cursor:pointer;">
               <input type="checkbox" id="no-place3-${race.id}" onchange="toggleNoThirdDividend('${race.id}', this.checked)" style="width:auto;">
               No 3rd dividend
@@ -3240,45 +3261,30 @@ function renderSettleList() {
           </div>
         </div>
       </div>
-      <button class="btn btn-gold" onclick="settleRace('${race.id}')">Settle Race ${race.race_number}</button>
+      <label style="display:flex;gap:8px;margin:12px 0;"><input type="checkbox" id="confirm-final-${race.id}" style="width:auto;"> I have verified the official FINAL result, any protest is resolved, and these are Sportsbet dividends.</label>
+      <button class="btn btn-gold" onclick="settleRace('${race.id}')">${race.status==='settled'?'Deliberate Admin Correction':'Settle Verified FINAL'} · R${race.race_number}</button>
     </div>`;
   }).join('');
+  for(const [id,v] of preserved) { const el=document.getElementById(id); if(el){el.value=v.value;el.checked=v.checked;} }
 }
 
 async function fetchFinalResult(raceId) {
-  const race = state.races.find(r => r.id === raceId);
-  if (!race) return;
-  const status = document.getElementById('result-status-' + raceId);
-  status.textContent = 'Checking final result…';
+  const race=state.races.find(r=>r.id===raceId);
+  if(!race||!state.isAdmin||race.status==='settled') return;
   try {
-    const date = new Intl.DateTimeFormat('en-CA',{timeZone:'Australia/Perth',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(race.race_time));
-    const res = await fetch('/.netlify/functions/puntersedge?action=results&date=' + encodeURIComponent(date) + '&categories=horse&country=AU&status=final');
-    if (!res.ok) throw new Error('PuntersEdge HTTP ' + res.status);
-    const payload = await res.json();
-    const results = Array.isArray(payload) ? payload : (payload.results || payload.races || []);
-    const norm = v => String(v ?? '').toLowerCase().replace(/[^a-z0-9]/g,'');
-    let result = results.find(x => race.api_id && String(x.race_id || '') === String(race.api_id));
-    if (!result) result = results.find(x => norm(x.venue) === norm(race.track) && String(x.race_number) === String(race.race_number));
-    if (!result) { status.textContent = 'Final result not available yet.'; showToast('Final result not available yet', 'warn'); return; }
-    if (result.status !== 'final') { status.textContent = 'Result is still interim — not safe to settle.'; return; }
-    const placings = Array.isArray(result.placings) ? result.placings : [];
-    const p1 = placings.find(x => Number(x.position) === 1) || placings[0];
-    const p2 = placings.find(x => Number(x.position) === 2) || placings[1];
-    const p3 = placings.find(x => Number(x.position) === 3) || placings[2];
-    if (!p1 || !p2) throw new Error('Final result has incomplete placings');
-    document.getElementById('pos1-'+raceId).value = p1.number ?? '';
-    document.getElementById('pos2-'+raceId).value = p2.number ?? '';
-    document.getElementById('pos3-'+raceId).value = p3?.number ?? '';
-    document.getElementById('windiv-'+raceId).value = '';
-    document.getElementById('place1-'+raceId).value = '';
-    document.getElementById('place2-'+raceId).value = '';
-    document.getElementById('place3-'+raceId).value = '';
-    status.textContent = '✓ FINAL placings loaded — enter Sportsbet dividends manually.';
-    showToast('Final placings loaded — enter Sportsbet dividends', 'success');
-  } catch (error) {
-    status.textContent = 'Could not load result.';
-    showToast('Could not fetch final result: ' + error.message, 'danger');
-  }
+    const {matchResult,resultPatch,raceDate}=await import('./supabase/functions/fpso-settlement/engine.mjs');
+    const response=await fetch('/.netlify/functions/puntersedge?'+new URLSearchParams({action:'results',date:raceDate(race.race_time),categories:'horse',country:'AU',limit:'1000'}));
+    if(!response.ok) throw new Error('Provider HTTP '+response.status);
+    const payload=await response.json();
+    const result=matchResult(race,Array.isArray(payload)?payload:payload.results||payload.races||[]);
+    const patch=resultPatch(race,result);
+    const scratches=[...new Set([...(result?.runners||[]).filter(r=>['scratched','late_scratching','reserve'].includes(r.status)),...(result?.deductions||[]).filter(r=>r.scratched_at)].map(r=>Number(r.number)).filter(n=>Number.isInteger(n)&&n>0))];
+    if(scratches.length){const {error}=await db.from('runners').update({scratched:true}).eq('race_id',raceId).in('number',scratches);if(error)throw error;for(const r of race.runners||[])if(scratches.includes(Number(r.number)))r.scratched=true;}
+    const {data,error}=await db.from('races').update(patch).eq('id',raceId).eq('status','open').select().single();
+    if(error) throw error;
+    Object.assign(race,data);renderSettleList();renderRaces();renderSettlementAttention();
+    showToast(patch.result_state==='final'?'FINAL placings loaded — enter official Sportsbet dividends':'RESULT NOT FINAL — settlement blocked','info');
+  } catch(error){showToast('Could not check FINAL result: '+error.message,'danger');}
 }
 function toggleNoThirdDividend(raceId, checked) {
   const input = document.getElementById('place3-' + raceId);
@@ -3290,9 +3296,13 @@ function toggleNoThirdDividend(raceId, checked) {
 
 async function settleRace(raceId) {
   const race = state.races.find(r => r.id === raceId);
-  if (!race) return;
+  if (!race || !state.isAdmin) return;
+  const confirmed=document.getElementById('confirm-final-'+raceId)?.checked===true;
+  if(!confirmed){showToast('Verify official FINAL and Sportsbet dividends first','warn');return;}
+  const correction=race.status==='settled';
+  if(correction && !confirm('Deliberately correct this protected FINAL result and recalculate the leaderboard?')) return;
   const favInput = parseInt(document.getElementById(`fav-${raceId}`).value);
-  const fav = favInput || race.pre_race_favourite?.number || race.odds_snapshot_favourite?.number || null;
+  const fav = favInput || race.pre_race_favourite?.number || race.favourite_number || null;
   const pos1 = parseInt(document.getElementById(`pos1-${raceId}`).value);
   const pos2 = parseInt(document.getElementById(`pos2-${raceId}`).value);
   const pos3 = parseInt(document.getElementById(`pos3-${raceId}`).value) || null;
@@ -3308,78 +3318,85 @@ async function settleRace(raceId) {
   const changes = { favourite_number:fav||null, result_1st:pos1, result_2nd:pos2, result_3rd:pos3,
     win_div:winDiv, place_div:place1, place_div_2nd:place2, place_div_3rd:place3, status:'settled' };
   if (!db) { showToast('Database unavailable. Result was not saved.', 'danger'); return; }
-  try { const {error}=await db.from('races').update(changes).eq('id',raceId).select().single(); if(error) throw error; }
+  try { const {data,error}=await db.rpc('fpso_admin_settle',{p_race_id:raceId,p_values:changes,p_confirm_final:confirmed,p_correction:correction}); if(error) throw error; Object.assign(changes,data); }
   catch(error){ showToast('Could not settle race: '+error.message,'danger'); return; }
   Object.assign(race,changes);
   showToast(`Race ${race.race_number} settled!`,'success');
-  renderSettleList(); renderRaces(); renderLeaderboard(); renderTracker();
+  renderSettleList(); renderRaces(); renderLeaderboard(); renderTracker(); renderSettlementAttention();
 }
 
-function renderPaidList() {
-  const container = document.getElementById('paid-list');
-  const participants = SUPABASE_URL === 'YOUR_SUPABASE_URL' ? getDemoParticipants() : state.participants;
-
-  const valid = participants.filter(p =>
-    state.races.length > 0 && state.races.every(r => p.selections[r.id] != null)
-  );
-
-  if (!valid.length) {
-    container.innerHTML = '<div class="text-dim text-sm">No valid entries yet (requires selection in every race).</div>';
-    return;
+function raceLifecycle(race,now=Date.now()) {
+  if(race.status==='settled') return 'Final';
+  if(race.result_state==='protest') return 'PROTEST / RESULT NOT FINAL';
+  if(new Date(race.race_time).getTime()>now) return 'Upcoming';
+  if(race.result_state==='final'||race.result_state==='awaiting_final'||now-new Date(race.race_time).getTime()>=180000) return 'Awaiting Final';
+  return 'Running';
+}
+function selectionLabel(race,number) {
+  const runner=(race.runners||[]).find(r=>r.number==number);
+  const original='#'+number+' — '+escapeHtml(runner?.name||'Unknown');
+  if(!runner?.scratched) return original;
+  const favourite=race.pre_race_favourite?.number||race.favourite_number;
+  const sub=(race.runners||[]).find(r=>r.number==favourite);
+  return original+' <strong style="color:var(--red);">SCRATCHED → '+(favourite?'#'+favourite+' '+escapeHtml(sub?.name||race.pre_race_favourite?.name||'Favourite')+' (scoring substitute)':'awaiting captured pre-race favourite')+'</strong>';
+}
+function validateCard(races) {
+  const problems=[];
+  if(races.length!==10) problems.push('Exactly 10 races required');
+  const seen=new Set(),ids=new Set();
+  for(const r of races) {
+    const k=normaliseRaceVenue(r.track)+':'+r.race_number;
+    const providerId=r.provider_id||r.api_id;
+    if(seen.has(k)||(providerId&&ids.has(providerId))) problems.push('Duplicate race');
+    seen.add(k);if(providerId)ids.add(providerId);
+    if(!r.track||!Number.isInteger(Number(r.race_number))||Number(r.race_number)<=0||!Number.isFinite(new Date(r.time||r.race_time).getTime())) problems.push('Valid race time and identity required');
+    const runners=r.runners||[],numbers=runners.map(x=>Number(x.number));
+    if(runners.filter(x=>!x.scratched).length<2||new Set(numbers).size!==numbers.length||runners.some(x=>!Number.isInteger(Number(x.number))||Number(x.number)<=0||!String(x.name||'').trim())) problems.push('Valid, distinct runners required');
   }
-
-  const scores = calculateScores(valid).sort((a, b) => b.total - a.total);
-
-  container.innerHTML = `
-    <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px;">${valid.length} valid ${valid.length === 1 ? 'entry' : 'entries'} · $${valid.length * 10} total prize pool</div>
-    ${scores.map((p, i) => {
-      const checkId = 'paid_' + p.id;
-      return `
-        <div class="paid-row">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-size:13px; color:var(--text-dim); min-width:20px;">${i + 1}.</span>
-            <span style="width:10px;height:10px;border-radius:50%;background:${p.colour};display:inline-block;"></span>
-            <div>
-              <div class="paid-name">${escapeHtml(p.name)}</div>
-              <div class="text-xs text-dim">Score: $${p.total.toFixed(2)}</div>
-            </div>
-          </div>
-          <div style="display:flex; align-items:center; gap:10px;">
-            <span class="text-xs text-dim">Paid $10</span>
-            <div class="paid-check ${getPaidStatus(p.id) ? 'checked' : ''}" onclick="togglePaid('${p.id}', this)" id="${checkId}">
-              ${getPaidStatus(p.id) ? '✓' : ''}
-            </div>
-          </div>
-        </div>
-      `;
-    }).join('')}
-    <div style="margin-top:12px; text-align:right;">
-      <button class="btn btn-outline btn-sm" onclick="exportPaidList()">Export List</button>
-    </div>
-  `;
+  return [...new Set(problems)];
 }
-
-let paidStatuses = {};
-function getPaidStatus(id) { return paidStatuses[id] || false; }
-function togglePaid(id, el) {
-  paidStatuses[id] = !paidStatuses[id];
-  el.classList.toggle('checked', paidStatuses[id]);
-  el.textContent = paidStatuses[id] ? '✓' : '';
-  localStorage.setItem('raceday_paid_' + (state.currentEvent?.id || 'demo'), JSON.stringify(paidStatuses));
+async function publishCard() {
+  if(!state.isAdmin||!db||!state.currentEvent) return;
+  const problems=validateCard(state.races);
+  if(problems.length){showToast(problems.join(' · '),'warn');return;}
+  const {error}=await db.rpc('fpso_publish_card',{p_event_id:state.currentEvent.id});
+  if(error){showToast('Card not published: '+error.message,'danger');return;}
+  state.currentEvent.card_published=true;updateBanner();renderAdminRaceList();renderRaces();
+  showToast('Validated 10-race card published','success');
 }
-
-function exportPaidList() {
-  const participants = SUPABASE_URL === 'YOUR_SUPABASE_URL' ? getDemoParticipants() : state.participants;
-  const valid = participants.filter(p => state.races.every(r => p.selections[r.id] != null));
-  const scores = calculateScores(valid).sort((a, b) => b.total - a.total);
-  let text = `RACE DAY — ${state.currentEvent?.name || 'Event'}\nPaid Checklist\n\n`;
-  scores.forEach((p, i) => {
-    text += `${i+1}. ${p.name} — Score: $${p.total.toFixed(2)} — Paid: ${getPaidStatus(p.id) ? 'YES' : 'NO'}\n`;
-  });
-  const blob = new Blob([text], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'raceday-paid-list.txt'; a.click();
+function renderSettlementAttention() {
+  const box=document.getElementById('settlement-attention');if(!box)return;
+  const overdue=state.currentEvent?.card_published ? state.races.filter(r=>r.status!=='settled'&&Date.now()-new Date(r.race_time).getTime()>=1800000) : [];
+  box.style.display=state.isAdmin&&overdue.length?'block':'none';
+  box.className='alert alert-warn';
+  box.innerHTML=state.isAdmin?'<strong>SETTLEMENT ATTENTION — '+overdue.length+' race(s) awaiting settlement after 30 minutes</strong>'+overdue.map(r=>'<div>'+escapeHtml(r.track)+' R'+r.race_number+': '+escapeHtml(r.settlement_reason||'FINAL result or official dividends not yet confirmed.')+'</div>').join('')+'<button class="btn btn-gold btn-sm" onclick="goAdmin();showAdminSection(\'settle\')">Investigate / Manual Settlement</button>':'';
+}
+function renderPaidList() {
+  const own=p=>!state.isAdmin&&state.user?.account_id&&p.account_id===state.user.account_id;
+  const html='<div class="text-sm text-dim" style="margin-bottom:12px;">Every entrant · Self-reported payments · Method locks with the event; Paid can change afterward.</div>'+state.participants.map(p=>`<div class="paid-row" style="flex-wrap:wrap;gap:10px;"><div><strong>${escapeHtml(p.name)}</strong><div class="text-xs text-dim">${p.paid_at?'Paid '+formatPerthDateTime(new Date(p.paid_at)):''}</div></div><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;"><select aria-label="Payment method for ${escapeHtml(p.name)}" ${own(p)&&!isSelectionsLocked()?'':'disabled'} onchange="updatePayment('${p.id}',{payment_method:this.value})"><option ${p.payment_method==='Cash'?'selected':''}>Cash</option><option ${p.payment_method==='Bank Transfer'?'selected':''}>Bank Transfer</option></select><label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="checkbox" style="width:auto;" ${p.paid?'checked':''} ${own(p)?'':'disabled'} onchange="updatePayment('${p.id}',{paid:this.checked})">${p.paid?'Paid':'Not Paid'}</label></div></div>`).join('');
+  for(const id of ['paid-list','shared-paid-list','public-payment-list']) {const el=document.getElementById(id);if(el)el.innerHTML=(id==='public-payment-list'?'<div class="card-title">Public Payment List</div>':'')+(state.participants.length?html:'<div class="text-dim">No entrants yet.</div>');}
+  const landing=document.getElementById('public-payment-list');
+  // Public list lives inside the landing modal so it remains visible before login.
+  const preview=document.getElementById('event-preview-content');if(landing&&preview&&landing.parentElement!==preview.parentElement)preview.parentElement.appendChild(landing);
+}
+async function updatePayment(id,changes) {
+  const p=state.participants.find(p=>p.id===id);
+  if(!p||state.isAdmin||!state.user?.account_id||p.account_id!==state.user.account_id){showToast('Only your own payment can be changed','warn');renderPaidList();return;}
+  const {data,error}=await db.from('participants').update(changes).eq('id',id).select().single();
+  if(error){showToast('Payment not saved: '+error.message,'danger');renderPaidList();return;}
+  Object.assign(p,data);renderPaidList();showToast('Payment status saved','success');
+}
+let liveRefreshTimer;
+function queueLiveRefresh() {
+  clearTimeout(liveRefreshTimer);
+  liveRefreshTimer=setTimeout(async()=>{
+    const previous=state.currentEvent?.id;
+    if(await loadCurrentEvent()) {
+      updateBanner();renderEventPreview();renderRaces();renderLeaderboard();renderTracker();renderPaidList();renderSettlementAttention();
+      if(state.isAdmin){renderSettleList();renderAdminRaceList();}
+      if(previous!==state.currentEvent?.id)setupRealtimeSubs();
+    }
+  },700);
 }
 
 async function loadArchivedEventDetail(eventId) {
@@ -3439,6 +3456,13 @@ function copyAppUrl() {
 // REALTIME (Supabase)
 // ============================================================
 function setupRealtimeSubs() {
+  if(!db) return;
+  if(state.resultsSub){db.removeChannel(state.resultsSub);state.resultsSub=null;}
+  if(state.currentEvent) state.resultsSub=db.channel('event-live-'+state.currentEvent.id)
+    .on('postgres_changes',{event:'*',schema:'public',table:'participants',filter:`event_id=eq.${state.currentEvent.id}`},queueLiveRefresh)
+    .on('postgres_changes',{event:'*',schema:'public',table:'races',filter:`event_id=eq.${state.currentEvent.id}`},queueLiveRefresh)
+    .on('postgres_changes',{event:'*',schema:'public',table:'runners'},queueLiveRefresh)
+    .on('postgres_changes',{event:'UPDATE',schema:'public',table:'events',filter:`id=eq.${state.currentEvent.id}`},queueLiveRefresh).subscribe();
   if (state.chatSub) { db.removeChannel(state.chatSub); state.chatSub = null; }
   if (!state.currentEvent) return;
 
@@ -3540,3 +3564,4 @@ window.addEventListener('orientationchange', syncStickyHeaderHeight);
 <!-- Backend: restored Supabase project with explicit grants and RLS. Redeploy marker: PR13 batch. -->
 </body>
 </html>
+
