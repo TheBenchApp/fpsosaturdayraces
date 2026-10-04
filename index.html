@@ -2972,8 +2972,6 @@ function toggleDraftRace(apiId) {
   else {
     const selected = loadedRacingCard.filter(x=>x.autoSelected);
     if (selected.length >= 10) { showToast('Remove a selected race before adding another', 'warn'); return; }
-    const sameTrack = selected.filter(x => String(x.track || x.venue || '').trim().toLowerCase() === String(r.track || r.venue || '').trim().toLowerCase()).length;
-    if (sameTrack >= 2) { showToast('Auto/manual draft is limited to 2 races per track', 'warn'); return; }
     r.autoSelected = true;
   }
   filterLoadedRaces();
