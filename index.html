@@ -2779,64 +2779,47 @@ async function searchRaces() { return loadRaceCard(); }
 
 async function loadRaceCard() {
   const input=document.getElementById('race-date-input');
-  if (!input.value) input.value=nextSaturdayISO();
-  const date=input.value, container=document.getElementById('race-search-results');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { container.innerHTML='<div class="alert alert-warn">Choose a valid race date.</div>'; return; }
-  container.innerHTML='<div class="text-dim text-sm">Loading Australian thoroughbred acceptances for '+escapeHtml(formatPerthDate(date))+'…</div>';
-  try {
-    const res=await fetch('/.netlify/functions/puntersedge?action=acceptances&date='+encodeURIComponent(date));
+  if(!input.value)input.value=nextSaturdayISO();
+  const date=input.value,container=document.getElementById('race-search-results');
+  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)){container.innerHTML='<div class="alert alert-warn">Choose a valid race date.</div>';return;}
+  container.innerHTML='<div class="text-dim text-sm">Loading Australian thoroughbred race card for '+escapeHtml(formatPerthDate(date))+'…</div>';
+  try{
+    const res=await fetch('/.netlify/functions/odds-api-net?action=card&date='+encodeURIComponent(date));
     const payload=await res.json();
-    if (!res.ok) throw new Error(payload.detail || payload.error || 'PuntersEdge acceptances request failed');
-    const meetings=Array.isArray(payload.meetings) ? payload.meetings : [];
-    const pendingMeetings=meetings.filter(m=>m.acceptances_published===false || !(m.races||[]).length);
-    const untimedMeetings = new Map();
-    loadedRacingCard=meetings.flatMap(m=>(m.races||[]).map(r=>{
-      const venue=m.venue || r.venue || 'Unknown track';
+    if(!res.ok)throw new Error(payload.detail||payload.error||'Race-card request failed');
+    const rows=Array.isArray(payload.races)?payload.races:[];
+    loadedRacingCard=rows.map(r=>{
+      const venue=r.race_venue||'Unknown track';
       const feature=featureRaceMeta(date,venue,r.race_number);
       const runners=(r.runners||[]).map(x=>({
-        number:x.number ?? x.runner_number, name:x.name || x.runner_name || 'Runner',
-        jockey:x.jockey || '', trainer:x.trainer || '', barrier:x.barrier ?? null,
-        scratched:Boolean(x.scratched), odds:null, place_odds:null, form:x.form || '',
-        emergency:Boolean(x.emergency), runner_ref:x.runner_ref || null, scratching:x.scratching || null
+        number:x.number??x.runner_number,name:x.name||x.runner_name||'Runner',
+        jockey:x.jockey||x.jockey_name||'',trainer:x.trainer||x.trainer_name||'',
+        barrier:x.barrier??null,scratched:Boolean(x.scratched??x.is_scratched),
+        odds:null,place_odds:null,form:x.form||'',emergency:false,runner_ref:null,scratching:null
       }));
-      const providerRaceId=r.race_id || null;
-      const resolvedTime=r.start_time || r.race_time || r.advertised_start_time || acceptanceTimeISO(date,r.start_time_local,m,venue) || null;
-      if (!resolvedTime || !Number.isFinite(new Date(resolvedTime).getTime())) {
-        const key=titleCase(venue);
-        untimedMeetings.set(key,(untimedMeetings.get(key)||0)+1);
-      }
+      const ts=Number(r.race_start_time);
+      const resolvedTime=Number.isFinite(ts)?new Date(ts*1000).toISOString():r.race_start_time;
       return {
-        id:providerRaceId || ('peacc:'+date+':'+venue+':'+r.race_number),
-        provider_id:providerRaceId, track:titleCase(venue), race_number:r.race_number,
-        name:feature?.name || r.race_name || r.name || ('Race '+(r.race_number||'')),
-        time:resolvedTime,
-        distance:r.distance_m ?? r.distance ?? null, class:feature?.grade || r.race_class || r.class || '',
-        conditions:r.conditions || '', runners,
-        active_runners:runners.filter(x=>!x.scratched).length, total_runners:runners.length,
-        scratched_runners:runners.filter(x=>x.scratched).length, runner_count_complete:true,
-        provider:'puntersedge'
+        id:r.event_id,provider_id:r.event_id,track:titleCase(venue),race_number:r.race_number,
+        name:feature?.name||r.race_name||('Race '+(r.race_number||'')),time:resolvedTime,
+        distance:r.race_distance??null,class:feature?.grade||'',conditions:'',runners,
+        active_runners:Number(r.active_runners??runners.filter(x=>!x.scratched).length),
+        total_runners:Number(r.total_runners??runners.length),
+        scratched_runners:runners.filter(x=>x.scratched).length,
+        runner_count_complete:Boolean(r.runner_count_complete??runners.length),
+        provider:'odds-api-net'
       };
-    })).filter(r=>r.time && Number.isFinite(new Date(r.time).getTime())).sort((a,b)=>new Date(a.time)-new Date(b.time));
-    if (!loadedRacingCard.length) throw new Error('PuntersEdge returned no timed Australian thoroughbred races for '+date+'.');
-    const isPicnicMeeting=name=>/\bpicnic\b/i.test(String(name||'').replace(/[,/_-]+/g,' '));
-    const blockingUntimedMeetings=new Map([...untimedMeetings].filter(([venue])=>!isPicnicMeeting(venue)));
-    const excludedPicnicMeetings=new Map([...untimedMeetings].filter(([venue])=>isPicnicMeeting(venue)));
-    const cardHasUntimedRaces=blockingUntimedMeetings.size>0;
-    document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10 && !cardHasUntimedRaces?'inline-flex':'none';
+    }).filter(r=>r.time&&Number.isFinite(new Date(r.time).getTime())&&r.runners.length>0)
+      .sort((a,b)=>new Date(a.time)-new Date(b.time));
+    if(!loadedRacingCard.length)throw new Error('No usable Australian thoroughbred racecards were returned for '+date+'.');
+    const incomplete=loadedRacingCard.filter(r=>!r.runner_count_complete);
+    const distinctMeetings=new Set(loadedRacingCard.map(r=>normaliseRaceVenue(r.track)));
+    document.getElementById('auto-card-btn').style.display=loadedRacingCard.length>=10&&!incomplete.length?'inline-flex':'none';
     clearGeneratedCard();
-    if (pendingMeetings.length) {
-      const names=pendingMeetings.map(m=>m.venue_canonical||m.venue||m.venue_norm||'Unknown meeting');
-      container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Acceptances pending:</strong> '+escapeHtml(names.join(', '))+'. Reload AU Card later to pick them up.</div>');
-    }
-    if (blockingUntimedMeetings.size) {
-      const missing=[...blockingUntimedMeetings.entries()].map(([venue,count])=>venue+' ('+count+' races)').join(', ');
-      container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Card warning:</strong> '+escapeHtml(missing)+' could not be timed and were excluded. AU CARD INCOMPLETE — AUTO GENERATE DISABLED.</div>');
-    }
-    if (excludedPicnicMeetings.size) {
-      const excluded=[...excludedPicnicMeetings.entries()].map(([venue,count])=>venue+' ('+count+' races)').join(', ');
-      container.insertAdjacentHTML('afterbegin','<div class="alert alert-info" style="margin-bottom:10px;"><strong>Excluded picnic meeting:</strong> '+escapeHtml(excluded)+'. This does not block Auto Generate.</div>');
-    }
-  } catch(e) { container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>'; }
+    renderLoadedRaces(loadedRacingCard);
+    container.insertAdjacentHTML('afterbegin','<div class="alert alert-success" style="margin-bottom:10px;"><strong>'+distinctMeetings.size+' meetings · '+loadedRacingCard.length+' races loaded.</strong> Race card supplied independently of PuntersEdge acceptances/events.</div>');
+    if(incomplete.length)container.insertAdjacentHTML('afterbegin','<div class="alert alert-warn" style="margin-bottom:10px;"><strong>Card warning:</strong> '+incomplete.length+' race(s) do not yet have a confirmed complete field. AUTO GENERATE DISABLED until the fields are complete.</div>');
+  }catch(e){container.innerHTML='<div class="alert alert-danger">'+escapeHtml(e.message)+'</div>';}
 }
 function titleCase(v) { return String(v || '').replace(/\b\w/g, c => c.toUpperCase()); }
 function featureRaceMeta(date, venue, raceNumber) {
