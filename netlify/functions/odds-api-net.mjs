@@ -7,8 +7,77 @@ export default async (request) => {
 
   const url = new URL(request.url);
   const action = url.searchParams.get("action") || "me";
-  const allowed = new Set(["me","usage","sports","leagues","bookmakers","coverage","racing","racing_diagnostic","race","race_odds","events","event_odds"]);
+  const allowed = new Set(["me","usage","sports","leagues","bookmakers","coverage","racing","racing_diagnostic","card","race","race_odds","events","event_odds"]);
   if (!allowed.has(action)) return new Response(JSON.stringify({ error: "Unsupported action" }), { status: 400, headers: { "content-type": "application/json" } });
+
+  // Build one Australian thoroughbred day-card from Odds API race discovery + racecards.
+  // We deliberately discover without race_country because some early AU races have historically
+  // arrived with unresolved/missing country labels. Australian state + requested Perth date are
+  // the safety filters; no bookmaker market is required for a race to exist.
+  if (action === "card") {
+    const date = url.searchParams.get("date");
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date || "")) {
+      return new Response(JSON.stringify({error:"date=YYYY-MM-DD is required"}),{status:400,headers:{"content-type":"application/json","cache-control":"no-store"}});
+    }
+    const start=Math.floor(new Date(date+"T00:00:00+08:00").getTime()/1000), end=start+86400;
+    const auStates=new Set(["WA","VIC","NSW","QLD","SA","TAS","ACT","NT"]);
+    const perthDate=ts=>Number.isFinite(Number(ts))?new Intl.DateTimeFormat("en-CA",{timeZone:"Australia/Perth",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(Number(ts)*1000)):null;
+    const list=[];
+    let cursor=null,pages=0;
+    try {
+      do {
+        const u=new URL(BASE+"/racing/events");
+        u.searchParams.set("race_type","horse-racing");
+        u.searchParams.set("start_from",String(start));
+        u.searchParams.set("start_to",String(end));
+        u.searchParams.set("limit","100");
+        if(cursor)u.searchParams.set("cursor",cursor);
+        const r=await fetch(u,{headers:{"X-API-Key":key,"Accept":"application/json"}});
+        const p=await r.json().catch(()=>({}));
+        if(!r.ok) return new Response(JSON.stringify({error:"Odds API race discovery failed",detail:p.error||("HTTP "+r.status)}),{status:r.status,headers:{"content-type":"application/json","cache-control":"no-store"}});
+        const rows=p.items||p.data?.items||p.data||[];
+        if(Array.isArray(rows))list.push(...rows);
+        cursor=p.next_cursor||p.data?.next_cursor||null; pages++;
+      } while(cursor&&pages<20);
+      const discovered=list.filter(r=>auStates.has(String(r.race_state||"").toUpperCase())&&perthDate(r.race_start_time)===date);
+      const loadOne=async r=>{
+        const id=r.event_id;
+        const u=new URL(BASE+"/racing/events/"+encodeURIComponent(id));
+        const rr=await fetch(u,{headers:{"X-API-Key":key,"Accept":"application/json"}});
+        const p=await rr.json().catch(()=>({}));
+        const d=p.data&&typeof p.data==="object"?{...p,...p.data}:p;
+        const rawRunners=d.runners||d.racecard?.runners||d.field||d.entries||[];
+        const runners=Array.isArray(rawRunners)?rawRunners.map(x=>({
+          number:x.runner_number??x.number??x.saddlecloth,
+          name:x.runner_name||x.name||x.horse_name||"Runner",
+          jockey:x.jockey_name||x.jockey||"",
+          trainer:x.trainer_name||x.trainer||"",
+          barrier:x.barrier??x.draw??null,
+          scratched:Boolean(x.is_scratched??x.scratched??String(x.runner_status||"").toLowerCase()==="scratched"),
+          form:x.form||""
+        })).filter(x=>x.number!=null):[];
+        return {
+          event_id:id,
+          race_venue:d.race_venue||r.race_venue,
+          race_number:d.race_number??r.race_number,
+          race_start_time:d.race_start_time??r.race_start_time,
+          race_distance:d.race_distance??r.race_distance??null,
+          race_state:d.race_state||r.race_state,
+          race_name:d.race_name||d.name||r.race_name||("Race "+(d.race_number??r.race_number??"")),
+          status:d.status||r.status||null,
+          active_runners:d.active_runners??r.active_runners??runners.filter(x=>!x.scratched).length,
+          total_runners:d.total_runners??r.total_runners??runners.length,
+          runner_count_complete:d.runner_count_complete??r.runner_count_complete??(runners.length>0),
+          runners
+        };
+      };
+      const races=[];
+      for(let i=0;i<discovered.length;i+=8) races.push(...await Promise.all(discovered.slice(i,i+8).map(loadOne)));
+      return new Response(JSON.stringify({date,source:"odds-api-net",discovered_count:discovered.length,races}),{status:200,headers:{"content-type":"application/json","cache-control":"no-store"}});
+    } catch(err) {
+      return new Response(JSON.stringify({error:"Odds API card load failed",detail:String(err?.message||err)}),{status:502,headers:{"content-type":"application/json","cache-control":"no-store"}});
+    }
+  }
 
   // Temporary admin diagnostic for future-race discovery. It intentionally returns
   // only non-sensitive catalogue metadata and never exposes the provider API key.
