@@ -1,7 +1,7 @@
 // Temporary Krok acceptance-test endpoint.
 // Purpose: prove future Australian race-card availability before we consider changing providers.
 // It never returns or logs the API key.
-const BASE = "https://api.krokodds.com";
+const BASE = "https://krokodds.com.au/api/v1";
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body, null, 2), {
