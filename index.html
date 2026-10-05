@@ -2781,7 +2781,7 @@ async function loadRaceCard() {
   const input=document.getElementById('race-date-input');
   if(!input.value)input.value=nextSaturdayISO();
   const date=input.value,container=document.getElementById('race-search-results');
-  if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)){container.innerHTML='<div class="alert alert-warn">Choose a valid race date.</div>';return;}
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){container.innerHTML='<div class="alert alert-warn">Choose a valid race date.</div>';return;}
   container.innerHTML='<div class="text-dim text-sm">Loading Australian thoroughbred race card for '+escapeHtml(formatPerthDate(date))+'…</div>';
   try{
     const res=await fetch('/.netlify/functions/odds-api-net?action=card&date='+encodeURIComponent(date));

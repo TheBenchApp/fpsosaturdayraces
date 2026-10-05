@@ -16,7 +16,7 @@ export default async (request) => {
   // the safety filters; no bookmaker market is required for a race to exist.
   if (action === "card") {
     const date = url.searchParams.get("date");
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date || "")) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) {
       return new Response(JSON.stringify({error:"date=YYYY-MM-DD is required"}),{status:400,headers:{"content-type":"application/json","cache-control":"no-store"}});
     }
     const start=Math.floor(new Date(date+"T00:00:00+08:00").getTime()/1000), end=start+86400;
@@ -42,11 +42,24 @@ export default async (request) => {
       const discovered=list.filter(r=>auStates.has(String(r.race_state||"").toUpperCase())&&perthDate(r.race_start_time)===date);
       const loadOne=async r=>{
         const id=r.event_id;
-        const u=new URL(BASE+"/racing/events/"+encodeURIComponent(id));
-        const rr=await fetch(u,{headers:{"X-API-Key":key,"Accept":"application/json"}});
-        const p=await rr.json().catch(()=>({}));
-        const d=p.data&&typeof p.data==="object"?{...p,...p.data}:p;
-        const rawRunners=d.runners||d.racecard?.runners||d.field||d.entries||[];
+        const headers={"X-API-Key":key,"Accept":"application/json"};
+        const detailUrl=new URL(BASE+"/racing/events/"+encodeURIComponent(id));
+        const detailRes=await fetch(detailUrl,{headers});
+        const detailPayload=await detailRes.json().catch(()=>({}));
+        const d=detailPayload.data&&typeof detailPayload.data==="object"?{...detailPayload,...detailPayload.data}:detailPayload;
+        let rawRunners=d.runners||d.racecard?.runners||d.field||d.entries||[];
+        let oddsPayload={};
+        // Only spend an extra API request when the racecard endpoint did not supply its declared field.
+        if(!Array.isArray(rawRunners)||!rawRunners.length){
+          const oddsUrl=new URL(BASE+"/racing/events/"+encodeURIComponent(id)+"/odds");
+          const oddsRes=await fetch(oddsUrl,{headers});
+          oddsPayload=await oddsRes.json().catch(()=>({}));
+          const oddsItems=Array.isArray(oddsPayload.items)?oddsPayload.items:[];
+          const sportsbet=oddsItems.find(x=>String(x.bookmaker_name||x.bookmaker||"").toLowerCase()==="sportsbet");
+          rawRunners=sportsbet?.runners||sportsbet?.payload?.runners||
+            oddsItems.find(x=>Array.isArray(x.runners))?.runners||
+            oddsItems.find(x=>Array.isArray(x.payload?.runners))?.payload?.runners||[];
+        }
         const runners=Array.isArray(rawRunners)?rawRunners.map(x=>({
           number:x.runner_number??x.number??x.saddlecloth,
           name:x.runner_name||x.name||x.horse_name||"Runner",
@@ -65,9 +78,9 @@ export default async (request) => {
           race_state:d.race_state||r.race_state,
           race_name:d.race_name||d.name||r.race_name||("Race "+(d.race_number??r.race_number??"")),
           status:d.status||r.status||null,
-          active_runners:d.active_runners??r.active_runners??runners.filter(x=>!x.scratched).length,
-          total_runners:d.total_runners??r.total_runners??runners.length,
-          runner_count_complete:d.runner_count_complete??r.runner_count_complete??(runners.length>0),
+          active_runners:oddsPayload.active_runners??d.active_runners??r.active_runners??runners.filter(x=>!x.scratched).length,
+          total_runners:oddsPayload.total_runners??d.total_runners??r.total_runners??runners.length,
+          runner_count_complete:oddsPayload.runner_count_complete??d.runner_count_complete??r.runner_count_complete??(runners.length>0),
           runners
         };
       };
