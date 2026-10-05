@@ -42,17 +42,24 @@ export default async (request) => {
       const discovered=list.filter(r=>auStates.has(String(r.race_state||"").toUpperCase())&&perthDate(r.race_start_time)===date);
       const loadOne=async r=>{
         const id=r.event_id;
-        const detailUrl=new URL(BASE+"/racing/events/"+encodeURIComponent(id));
-        const oddsUrl=new URL(BASE+"/racing/events/"+encodeURIComponent(id)+"/odds");
         const headers={"X-API-Key":key,"Accept":"application/json"};
-        const [detailRes,oddsRes]=await Promise.all([fetch(detailUrl,{headers}),fetch(oddsUrl,{headers})]);
+        const detailUrl=new URL(BASE+"/racing/events/"+encodeURIComponent(id));
+        const detailRes=await fetch(detailUrl,{headers});
         const detailPayload=await detailRes.json().catch(()=>({}));
-        const oddsPayload=await oddsRes.json().catch(()=>({}));
         const d=detailPayload.data&&typeof detailPayload.data==="object"?{...detailPayload,...detailPayload.data}:detailPayload;
-        const oddsItems=Array.isArray(oddsPayload.items)?oddsPayload.items:[];
-        const sportsbet=oddsItems.find(x=>String(x.bookmaker_name||x.bookmaker||"").toLowerCase()==="sportsbet");
-        const pricedField=sportsbet?.runners||sportsbet?.payload?.runners||oddsItems.find(x=>Array.isArray(x.runners)||Array.isArray(x.payload?.runners))?.runners||oddsItems.find(x=>Array.isArray(x.payload?.runners))?.payload?.runners||[];
-        const rawRunners=d.runners||d.racecard?.runners||d.field||d.entries||pricedField||[];
+        let rawRunners=d.runners||d.racecard?.runners||d.field||d.entries||[];
+        let oddsPayload={};
+        // Only spend an extra API request when the racecard endpoint did not supply its declared field.
+        if(!Array.isArray(rawRunners)||!rawRunners.length){
+          const oddsUrl=new URL(BASE+"/racing/events/"+encodeURIComponent(id)+"/odds");
+          const oddsRes=await fetch(oddsUrl,{headers});
+          oddsPayload=await oddsRes.json().catch(()=>({}));
+          const oddsItems=Array.isArray(oddsPayload.items)?oddsPayload.items:[];
+          const sportsbet=oddsItems.find(x=>String(x.bookmaker_name||x.bookmaker||"").toLowerCase()==="sportsbet");
+          rawRunners=sportsbet?.runners||sportsbet?.payload?.runners||
+            oddsItems.find(x=>Array.isArray(x.runners))?.runners||
+            oddsItems.find(x=>Array.isArray(x.payload?.runners))?.payload?.runners||[];
+        }
         const runners=Array.isArray(rawRunners)?rawRunners.map(x=>({
           number:x.runner_number??x.number??x.saddlecloth,
           name:x.runner_name||x.name||x.horse_name||"Runner",
