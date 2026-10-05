@@ -16,7 +16,7 @@ export default async (request) => {
   // the safety filters; no bookmaker market is required for a race to exist.
   if (action === "card") {
     const date = url.searchParams.get("date");
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date || "")) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || "")) {
       return new Response(JSON.stringify({error:"date=YYYY-MM-DD is required"}),{status:400,headers:{"content-type":"application/json","cache-control":"no-store"}});
     }
     const start=Math.floor(new Date(date+"T00:00:00+08:00").getTime()/1000), end=start+86400;
